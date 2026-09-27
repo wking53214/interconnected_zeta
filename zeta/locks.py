@@ -1,0 +1,154 @@
+"""LockSpec / LockRegistry: declarative gate definitions.
+
+Generalizes the registry SHAPE (a named dict entry mapping to conditions,
+checked by a hand-written `can_X` method) already used independently, four
+times, in perceive_consolidated.py:
+  - EscalationPolicy.RISK_TIERS            (perceive_consolidated.py:142-147)
+  - RuleModificationPolicy.MODIFICATION_LEVELS (perceive_consolidated.py:178-182)
+  - DataExportPolicy.EXPORT_RESTRICTIONS   (perceive_consolidated.py:206-210)
+  - EmergencyOverridePolicy.OVERRIDE_CATEGORIES (perceive_consolidated.py:234-238)
+
+plus the dwell/lock_seconds/force parameters already used (uniquely,
+per-instance, non-reusably) by OBSERVE's EscalationPolicy(dwell_threshold,
+lock_seconds) constructor (observe_consolidated.py:849-851) and its
+CLINICAL_SAFETY_BYPASS force path (observe_consolidated.py:1280-1305).
+
+IMPORTANT — this generalizes the SHAPE, not full 1:1 semantic coverage of
+all four source registries. An adversarial review against the actual
+source found real gaps, kept here rather than glossed over:
+
+  - RISK_TIERS is dead configuration: EscalationPolicy.can_escalate never
+    reads it. There is no live `can_X` check for LockSpec to have
+    generalized here — only the shape of the (unused) dict.
+  - OVERRIDE_CATEGORIES['audit_required'] is likewise declared but never
+    read by can_override. Only 3 of its 4 fields are actually enforced
+    in the source; LockSpec has no equivalent of the unused 4th.
+  - EXPORT_RESTRICTIONS['aggregate_only'] requires zero conditions
+    (always approved) — LockSpec cannot represent this, because
+    required_keys must be non-empty. An "always-open" lock is out of
+    scope for this module as written.
+  - MODIFICATION_LEVELS' fields (approval_required, temporal_lock_hours)
+    are numeric/elapsed-time thresholds compared against counters, not
+    boolean Key-present conditions, and temporal_lock_hours is a
+    *minimum wait since the last event before the gate may open* — the
+    opposite of `lock_seconds` (which starts a cooldown *after* opening).
+    LockSpec has no field for a pre-open refractory period; this pattern
+    is not yet covered.
+  - OVERRIDE_CATEGORIES['allowed'] is a categorical kill-switch
+    (unconditional rejection regardless of any input) that does not fit
+    the required_keys + combination shape without fabricating a
+    never-present Key as a workaround. Not currently supported directly.
+"""
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Dict, Iterable, List, Optional, Set, Tuple
+
+
+class Combination(str, Enum):
+    AND = "AND"
+    OR = "OR"
+    N_OF_M = "N_OF_M"
+
+
+@dataclass(frozen=True)
+class LockSpec:
+    """Declarative definition of one gate.
+
+    lock_id:         unique name (e.g. "sepsis_lock", "discharge_lock")
+    required_keys:   Key names this lock evaluates
+    combination:     AND (all required), OR (any one), N_OF_M (at least `n`)
+    n:               required count when combination is N_OF_M
+    dwell_threshold: consecutive satisfying observations needed before the
+                     lock opens (1 = opens on first observation, no debounce).
+                     Mirrors OBSERVE's dwell_threshold, but generalized: OBSERVE
+                     hardcodes this to exactly one shared regime value; here
+                     it is a per-lock parameter, so many named locks can each
+                     have their own debounce sensitivity.
+    lock_seconds:    once open, how long the lock stays latched open and
+                     ignores new input (0 = no cooldown). Mirrors OBSERVE's
+                     lock_seconds cooldown latch.
+    force:           if True, a satisfying observation opens the lock
+                     immediately, skipping dwell_threshold entirely. Mirrors
+                     observe_consolidated.py's CLINICAL_SAFETY_BYPASS, which
+                     is exactly this behavior but hardcoded as one inline
+                     `hard_rule_fired or syndrome_fired` check rather than a
+                     reusable, declarable flag.
+    """
+
+    lock_id: str
+    required_keys: Tuple[str, ...]
+    combination: Combination = Combination.AND
+    n: Optional[int] = None
+    dwell_threshold: int = 1
+    lock_seconds: float = 0.0
+    force: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.lock_id:
+            raise ValueError("lock_id must be non-empty")
+        if not self.required_keys:
+            raise ValueError(f"Lock '{self.lock_id}': required_keys must be non-empty")
+        if len(set(self.required_keys)) != len(self.required_keys):
+            raise ValueError(
+                f"Lock '{self.lock_id}': required_keys contains duplicates "
+                f"{self.required_keys!r}; each key name must appear once "
+                f"(a duplicate would double-count toward N_OF_M's n)"
+            )
+        if self.combination == Combination.N_OF_M:
+            if not self.n or self.n < 1:
+                raise ValueError(f"Lock '{self.lock_id}': N_OF_M combination requires n >= 1")
+            if self.n > len(self.required_keys):
+                raise ValueError(
+                    f"Lock '{self.lock_id}': n={self.n} exceeds "
+                    f"required_keys count ({len(self.required_keys)})"
+                )
+        if self.dwell_threshold < 1:
+            raise ValueError(f"Lock '{self.lock_id}': dwell_threshold must be >= 1")
+        if self.lock_seconds < 0:
+            raise ValueError(f"Lock '{self.lock_id}': lock_seconds must be >= 0")
+
+    def keys_satisfied(self, present_names: Set[str]) -> bool:
+        # required_keys is guaranteed duplicate-free by __post_init__; using
+        # set intersection (rather than summing over the tuple) keeps that
+        # guarantee airtight even if this method is ever called on a
+        # LockSpec built by some other path that skips validation.
+        matched = len(set(self.required_keys) & present_names)
+        if self.combination == Combination.AND:
+            return matched == len(self.required_keys)
+        if self.combination == Combination.OR:
+            return matched >= 1
+        if self.combination == Combination.N_OF_M:
+            return matched >= (self.n or 0)
+        raise ValueError(f"Lock '{self.lock_id}': unknown combination {self.combination!r}")
+
+
+class LockRegistry:
+    """Holds LockSpecs as data, replacing the pattern of one hardcoded dict
+    per policy class (RISK_TIERS / MODIFICATION_LEVELS / EXPORT_RESTRICTIONS /
+    OVERRIDE_CATEGORIES) with one reusable, domain-agnostic table."""
+
+    def __init__(self, specs: Optional[Iterable[LockSpec]] = None) -> None:
+        self._specs: Dict[str, LockSpec] = {}
+        for s in specs or ():
+            self.register(s)
+
+    def register(self, spec: LockSpec) -> None:
+        if spec.lock_id in self._specs:
+            raise ValueError(f"Lock '{spec.lock_id}' already registered")
+        self._specs[spec.lock_id] = spec
+
+    def get(self, lock_id: str) -> LockSpec:
+        try:
+            return self._specs[lock_id]
+        except KeyError:
+            raise KeyError(f"Unknown lock '{lock_id}'") from None
+
+    def all(self) -> List[LockSpec]:
+        return list(self._specs.values())
+
+    def __contains__(self, lock_id: str) -> bool:
+        return lock_id in self._specs
+
+    def __len__(self) -> int:
+        return len(self._specs)

@@ -1,0 +1,19 @@
+[project]
+name = "zeta"
+version = "0.1.0"
+description = "A domain-agnostic Locks layer: Keys open Locks under declared AND/OR/N-of-M combinations, with dwell debounce, cooldown latching, and force bypass."
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["zeta"]
