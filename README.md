@@ -1,5 +1,15 @@
 # interconnected_zeta
 
+**Role in the governed action stack:** INTERLOCKS — Keys → Locks (open/closed) with dwell, cooldown, and force-open.
+
+```text
+α Alpha (Keys) → ζ Zeta (Locks) → β Beta (Decision) → δ Delta (custody)
+```
+
+Part of the composable decision spine. Live orchestrated path: [observe-perceive](https://github.com/wking53214/observe-perceive). Domain custody runtime: [sentinel_os](https://github.com/wking53214/sentinel_os).
+
+---
+
 A domain-agnostic **Locks** layer.
 
 A **Lock** is a barrier that requires specific detected **Keys**, in a
