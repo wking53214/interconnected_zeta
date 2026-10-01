@@ -19,8 +19,8 @@ Keys open Locks under declared `AND` / `OR` / `N_OF_M` combination, with per-loc
 | Piece | Extracted from | Generalized |
 |---|---|---|
 | `LockSpec` registry | PERCEIVE `MODIFICATION_LEVELS` / `RISK_TIERS` / `EXPORT_RESTRICTIONS` / `OVERRIDE_CATEGORIES` | Named entry → conditions. Not 1:1 semantic coverage (see Gaps). |
-| Dwell + cooldown | Dwell and cooldown policy in a separate private repository | One shared regime per patient → N independent locks per entity. |
-| Force bypass | Clinical safety bypass in a separate private repository | Inline OR-gate → declarable `force=True`. |
+| Dwell + cooldown | A separate private repository | One shared regime per patient → N independent locks per entity. |
+| Force bypass | A separate private repository | Inline OR-gate → declarable `force=True`. |
 | Combination | PERCEIVE `ConsensusEngine` (AND-only) | AND / OR / N_OF_M. |
 | Deterministic time | PERCEIVE `GovernanceState` | Every transition takes an explicit `timestamp`. Never wall-clock. |
 
@@ -59,7 +59,7 @@ zeta/evaluator.py   LockEvaluator, LockResult
 
 | Gap | Detail |
 |---|---|
-| Not on the live path | A separate private repository still uses its own escalation policy / PERCEIVE dicts. ζ is a composable extract. Dual implementation. |
+| Not on the live path | A separate private repository still uses its own implementation. ζ is a composable extract. Dual implementation. |
 | In-memory | Process crash loses all lock state. No snapshot-to-disk helper. |
 | Uncalibrated tunables | `dwell_threshold`, `lock_seconds` are caller-chosen. No recommended production values. |
 | Incomplete PERCEIVE coverage | Numeric elapsed-time thresholds, always-open aggregate export, unconditional reject categories: **not representable**. |
@@ -98,7 +98,7 @@ result = evaluator.evaluate("patient_1", keys, "sepsis_lock", datetime.now())
 # LockResult: lock_id, open, changed, forced, keys_satisfied, ...
 ```
 
-`LockResult.changed` is what β uses as the nearest analogue of the escalation-required flag in the implementation ζ was extracted from.
+`LockResult.changed` is what β uses as the nearest analogue of the corresponding flag in the implementation ζ was extracted from.
 
 ## 7. Stack Integration Topology
 
