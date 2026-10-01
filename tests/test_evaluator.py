@@ -75,7 +75,7 @@ def test_dwell_resets_when_observation_stops_matching_pending():
     assert "1/3" in r3.reasons[0]
 
 
-# --- Symmetric dwell debounce: closing (the nuance found in OBSERVE) ---
+# --- Symmetric dwell debounce: closing (the nuance found in the original private implementation) ---
 
 def test_closing_requires_same_dwell_threshold_as_opening():
     spec = LockSpec(lock_id="l1", required_keys=("fever",), dwell_threshold=2)

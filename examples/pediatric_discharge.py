@@ -16,7 +16,7 @@ from zeta import Combination, Key, KeySet, LockEvaluator, LockRegistry, LockSpec
 def build_registry() -> LockRegistry:
     return LockRegistry([
         # Any 2 of these 3 sepsis signs -> escalate immediately, no debounce
-        # (this is the CLINICAL_SAFETY_BYPASS case: a real spike is never noise).
+        # (this is the force-open case: a real spike is never noise).
         LockSpec(
             lock_id="sepsis_lock",
             required_keys=("fever", "tachycardia", "tachypnea"),

@@ -2,17 +2,17 @@
 
 Generalizes two patterns that exist today as separate, narrower mechanisms:
 
-  - OBSERVE's EscalationPolicy instance (observe_consolidated.py:846-889)
-    holds exactly this shape of state (current_regime, pending_regime,
-    dwell_count, escalation_locked, last_escalation_time) but as ONE shared
+  - The original private escalation policy instance
+    holds exactly this shape of state (current regime, pending regime,
+    dwell count, escalation lock flag, last escalation time) but as ONE shared
     instance per patient, wearing multiple unrelated hats: the same fields
     are reused for regime escalation AND (separately) for the data-integrity
-    fault path (observe_consolidated.py:1345-1361). LockStateStore instead
+    fault path. LockStateStore instead
     keeps one independent LockState per (entity, lock) pair, so N named
     locks per entity never share fields.
 
-  - PERCEIVE's GovernanceState (perceive_consolidated.py:823-852) keys
-    history by subject_id/rule_type and derives all decisions against a
+  - The original private governance state keys
+    history by subject and rule type and derives all decisions against a
     caller-supplied reference timestamp rather than wall-clock time, so
     identical inputs always replay to identical outputs. LockStateStore
     keeps that same determinism discipline: every transition in
@@ -28,10 +28,10 @@ from typing import Dict, Optional
 class LockState:
     """Mutable state for one (entity, lock) pair.
 
-    `pending_open` + `pending_since_count` mirror OBSERVE's
-    `pending_regime` + `dwell_count` (observe_consolidated.py:853-854):
+    `pending_open` + `pending_since_count` mirror the original private
+    pending-regime and dwell-count fields:
     dwell debounces a transition in EITHER direction (opening OR closing),
-    matching the source's actual behavior — de-escalation requires the same
+    matching the original's actual behavior: de-escalation requires the same
     dwell_threshold consecutive confirmations as escalation does, so a
     single normal reading right after a real spike doesn't immediately
     flip the lock back closed.

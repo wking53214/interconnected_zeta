@@ -2,39 +2,40 @@
 
 Generalizes the registry SHAPE (a named dict entry mapping to conditions,
 checked by a hand-written `can_X` method) already used independently, four
-times, in perceive_consolidated.py:
-  - EscalationPolicy.RISK_TIERS            (perceive_consolidated.py:142-147)
-  - RuleModificationPolicy.MODIFICATION_LEVELS (perceive_consolidated.py:178-182)
-  - DataExportPolicy.EXPORT_RESTRICTIONS   (perceive_consolidated.py:206-210)
-  - EmergencyOverridePolicy.OVERRIDE_CATEGORIES (perceive_consolidated.py:234-238)
+times, in the original private implementation:
+  - the escalation policy's risk-tier table
+  - the rule-modification policy's modification-level table
+  - the data-export policy's export-restriction table
+  - the emergency-override policy's override-category table
 
 plus the dwell/lock_seconds/force parameters already used (uniquely,
-per-instance, non-reusably) by OBSERVE's EscalationPolicy(dwell_threshold,
-lock_seconds) constructor (observe_consolidated.py:849-851) and its
-CLINICAL_SAFETY_BYPASS force path (observe_consolidated.py:1280-1305).
+per-instance, non-reusably) by the original private escalation policy's
+constructor (dwell_threshold, lock_seconds) and its force-bypass path.
 
-IMPORTANT — this generalizes the SHAPE, not full 1:1 semantic coverage of
-all four source registries. An adversarial review against the actual
-source found real gaps, kept here rather than glossed over:
+IMPORTANT: this generalizes the SHAPE, not full 1:1 semantic coverage of
+all four source registries. An adversarial review against the original
+private implementation found real gaps, kept here rather than glossed over:
 
-  - RISK_TIERS is dead configuration: EscalationPolicy.can_escalate never
+  - The risk-tier table is dead configuration: the escalation check never
     reads it. There is no live `can_X` check for LockSpec to have
-    generalized here — only the shape of the (unused) dict.
-  - OVERRIDE_CATEGORIES['audit_required'] is likewise declared but never
-    read by can_override. Only 3 of its 4 fields are actually enforced
-    in the source; LockSpec has no equivalent of the unused 4th.
-  - EXPORT_RESTRICTIONS['aggregate_only'] requires zero conditions
-    (always approved) — LockSpec cannot represent this, because
+    generalized here, only the shape of the (unused) dict.
+  - The override-category table's audit-required field is likewise declared
+    but never read by the override check. Only 3 of its 4 fields are
+    actually enforced in the original; LockSpec has no equivalent of the
+    unused 4th.
+  - The export-restriction table's aggregate-only entry requires zero
+    conditions (always approved). LockSpec cannot represent this, because
     required_keys must be non-empty. An "always-open" lock is out of
     scope for this module as written.
-  - MODIFICATION_LEVELS' fields (approval_required, temporal_lock_hours)
+  - The modification-level table's fields (an approval requirement and a
+    temporal-lock duration in hours)
     are numeric/elapsed-time thresholds compared against counters, not
-    boolean Key-present conditions, and temporal_lock_hours is a
-    *minimum wait since the last event before the gate may open* — the
+    boolean Key-present conditions, and the temporal-lock duration is a
+    *minimum wait since the last event before the gate may open*, the
     opposite of `lock_seconds` (which starts a cooldown *after* opening).
     LockSpec has no field for a pre-open refractory period; this pattern
     is not yet covered.
-  - OVERRIDE_CATEGORIES['allowed'] is a categorical kill-switch
+  - The override-category table's "allowed" flag is a categorical kill-switch
     (unconditional rejection regardless of any input) that does not fit
     the required_keys + combination shape without fabricating a
     never-present Key as a workaround. Not currently supported directly.
@@ -61,18 +62,19 @@ class LockSpec:
     n:               required count when combination is N_OF_M
     dwell_threshold: consecutive satisfying observations needed before the
                      lock opens (1 = opens on first observation, no debounce).
-                     Mirrors OBSERVE's dwell_threshold, but generalized: OBSERVE
-                     hardcodes this to exactly one shared regime value; here
+                     Mirrors the original private dwell threshold, but
+                     generalized: the original hardcodes this to exactly one
+                     shared regime value; here
                      it is a per-lock parameter, so many named locks can each
                      have their own debounce sensitivity.
     lock_seconds:    once open, how long the lock stays latched open and
-                     ignores new input (0 = no cooldown). Mirrors OBSERVE's
-                     lock_seconds cooldown latch.
+                     ignores new input (0 = no cooldown). Mirrors the original
+                     private cooldown latch.
     force:           if True, a satisfying observation opens the lock
                      immediately, skipping dwell_threshold entirely. Mirrors
-                     observe_consolidated.py's CLINICAL_SAFETY_BYPASS, which
+                     the original private force bypass, which
                      is exactly this behavior but hardcoded as one inline
-                     `hard_rule_fired or syndrome_fired` check rather than a
+                     OR over two rule-fired flags rather than a
                      reusable, declarable flag.
     """
 
@@ -125,8 +127,8 @@ class LockSpec:
 
 class LockRegistry:
     """Holds LockSpecs as data, replacing the pattern of one hardcoded dict
-    per policy class (RISK_TIERS / MODIFICATION_LEVELS / EXPORT_RESTRICTIONS /
-    OVERRIDE_CATEGORIES) with one reusable, domain-agnostic table."""
+    per policy class (risk tiers / modification levels / export restrictions /
+    override categories) with one reusable, domain-agnostic table."""
 
     def __init__(self, specs: Optional[Iterable[LockSpec]] = None) -> None:
         self._specs: Dict[str, LockSpec] = {}

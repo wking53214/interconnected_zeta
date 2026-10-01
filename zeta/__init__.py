@@ -7,13 +7,12 @@ declared to force-open (bypassing debounce) or to run advisory-only.
 
 This module is an extraction, not a fresh invention. Every mechanic here
 already existed, independently, at least five times across the governance
-stack (PERCEIVE's RuleModificationPolicy/EscalationPolicy/DataExportPolicy/
-EmergencyOverridePolicy, PERCEIVE's ConsensusEngine, PERCEIVE's
-GovernanceState + PolicyEnforcementConfig, OBSERVE's EscalationPolicy dwell/
-hysteresis state machine, and OBSERVE's CLINICAL_SAFETY_BYPASS OR-gate). See
-README.md for the file/line provenance of each piece. zeta collapses those
-five hardcoded, single-purpose implementations into one declarative,
-reusable layer.
+stack (four per-policy registries with hand-written checks, a consensus
+step, a governance state tracker with its enforcement config, a dwell/
+hysteresis state machine, and a force-bypass OR-gate, all in the original
+private implementation). See README.md for the origin of each piece. zeta
+collapses those five hardcoded, single-purpose implementations into one
+declarative, reusable layer.
 """
 
 from .keys import Key, KeySet

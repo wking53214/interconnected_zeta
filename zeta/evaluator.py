@@ -3,33 +3,32 @@
 Replaces the hardcoded, single-purpose combination/debounce logic
 duplicated across the governance stack:
 
-  - PERCEIVE's ConsensusEngine.evaluate (perceive_consolidated.py:483-504)
-    is a fixed `all(o.approved for o in policy_outputs)` — AND-only, no
+  - The original private consensus step is a fixed all-approved check
+    over the policy outputs, AND-only, no
     dwell, no cooldown, no force path, evaluated fresh every call with no
     persisted state. NOTE: it also computes a geometric-mean confidence
-    score across all gate outputs (`math.prod(confidences) ** (1/n)`),
-    which is load-bearing downstream (the returned verdict, the audit
-    hash, and optional DGK multi-node input). LockResult has no
-    equivalent confidence field — this evaluator reproduces the
-    open/closed gating decision, not that continuous confidence
-    aggregation, which remains a gap if a caller needs it.
+    score across all gate outputs, which is load-bearing downstream (the
+    returned verdict, the audit hash, and optional multi-node input).
+    LockResult has no equivalent confidence field; this evaluator
+    reproduces the open/closed gating decision, not that continuous
+    confidence aggregation, which remains a gap if a caller needs it.
 
-  - PERCEIVE's can_escalate / can_modify / can_export / can_override
-    (perceive_consolidated.py:149-259) each hand-write their own
-    if-checks against a registry entry, returning (bool, List[str]) —
+  - The original private per-policy check methods (escalate, modify,
+    export, override) each hand-write their own
+    if-checks against a registry entry, returning (bool, List[str]),
     real, working gating, but re-implemented four separate times with no
     shared combination or state logic.
 
-  - OBSERVE's EscalationPolicy.evaluate (observe_consolidated.py:858-889)
+  - The original private escalation policy's evaluate step
     has real, correct dwell debounce and lock_seconds cooldown latching,
-    and — importantly — that dwell debounce is SYMMETRIC: a transition
+    and, importantly, that dwell debounce is SYMMETRIC: a transition
     away from the current regime (escalating OR de-escalating) both need
     `dwell_threshold` consecutive matching observations before they're
-    confirmed. Only the resulting cooldown latch (`escalation_locked`) is
-    asymmetric — it's only armed when the confirmed transition is an
+    confirmed. Only the resulting cooldown latch is
+    asymmetric: it's only armed when the confirmed transition is an
     escalation. This evaluator reproduces both properties, generalized
     from one hardcoded scalar regime to a named Key combination per lock.
-    One thing NOT reproduced: OBSERVE's regime is 4-valued (stable/
+    One thing NOT reproduced: the original regime is 4-valued (stable/
     caution/warning/critical), so a dwell-confirmed transition it would
     treat as real (e.g. stable -> caution, no escalation) collapses here
     to "no change" if both map to the same lock's closed state. A single
@@ -37,9 +36,9 @@ duplicated across the governance stack:
     kind of closed changed." Model each such partition boundary as its
     own named lock if that granularity matters to a caller.
 
-  - The CLINICAL_SAFETY_BYPASS OR-gate (observe_consolidated.py:1280-1305)
-    is a real force-bypass for the OPENING direction only — inline
-    `hard_rule_fired or syndrome_fired`, inseparable from the escalation
+  - The original private force-bypass OR-gate
+    is a real force-bypass for the OPENING direction only, inline
+    as an OR over two rule-fired flags, inseparable from the escalation
     orchestration code around it, and with no equivalent bypass for
     closing (de-escalation always goes through the normal dwell path).
 
@@ -62,7 +61,7 @@ class LockResult:
     """Outcome of evaluating one lock at one reference time.
 
     Shaped like the (bool, List[str]) "approved, violations" convention
-    PERCEIVE's can_escalate/can_modify/can_export/can_override already use,
+    the original private per-policy check methods already use,
     so a LockResult drops directly into that calling convention.
     """
 
@@ -83,8 +82,8 @@ class LockEvaluator:
         state = self.state_store.get(entity_id, lock_id)
 
         # Cooldown latch: while locked, ignore new input entirely, in
-        # either direction. Mirrors OBSERVE's
-        # `if self.escalation_locked and ... elapsed < self.lock_seconds: return`.
+        # either direction. Mirrors the original private cooldown check,
+        # which returns early while less than lock_seconds has elapsed.
         if state.locked_until is not None:
             if timestamp < state.locked_until:
                 return LockResult(
@@ -100,8 +99,8 @@ class LockEvaluator:
         satisfied = spec.keys_satisfied(present)
 
         # Force bypass: only ever forces the OPENING direction, immediately,
-        # skipping dwell. Mirrors CLINICAL_SAFETY_BYPASS, which never forces
-        # de-escalation. Only takes effect when the lock isn't already open.
+        # skipping dwell. Mirrors the original private force bypass, which never
+        # forces de-escalation. Only takes effect when the lock isn't already open.
         if satisfied and spec.force and not state.open:
             state.open = True
             state.pending_open = None
@@ -121,9 +120,9 @@ class LockEvaluator:
 
         if satisfied == state.open:
             # Observation matches the currently-confirmed state: no
-            # transition pending. Mirrors OBSERVE resetting
-            # pending_regime/dwell_count when new_regime == current_regime
-            # (observe_consolidated.py:865-868).
+            # transition pending. Mirrors the original private implementation
+            # resetting its pending regime and dwell count when the new regime
+            # equals the current regime.
             state.pending_open = None
             state.pending_since_count = 0
             self.state_store.set(entity_id, lock_id, state)
@@ -136,8 +135,8 @@ class LockEvaluator:
             )
 
         # Observation differs from the confirmed state: accumulate dwell.
-        # Mirrors OBSERVE's pending_regime/dwell_count accumulation
-        # (observe_consolidated.py:870-877), generalized to a boolean
+        # Mirrors the original private pending-regime and dwell-count
+        # accumulation, generalized to a boolean
         # "pending open/closed" per (entity, lock) instead of one shared
         # counter per patient.
         if satisfied == state.pending_open:

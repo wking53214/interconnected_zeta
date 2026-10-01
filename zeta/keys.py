@@ -1,8 +1,8 @@
 """Key: a named, scored signal detected in entity data.
 
 Generalizes the ad hoc named booleans already computed inline in the
-governance stack (e.g. observe_consolidated.py's `hard_rule_fired`,
-`syndrome_fired`) into a first-class, reusable unit that a Lock can
+governance stack (e.g. the hard-rule and syndrome flags in the original
+private implementation) into a first-class, reusable unit that a Lock can
 reference by name instead of each caller re-deriving its own booleans.
 """
 
