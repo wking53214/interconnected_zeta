@@ -10,17 +10,17 @@ Domain-agnostic **Locks** layer. Version `0.1.0`. Stdlib only. Python ≥ 3.9.
 α Alpha (Keys) → ζ Zeta (this repo) → β Beta (Decision) → δ Delta (custody)
 ```
 
-Keys open Locks under declared `AND` / `OR` / `N_OF_M` combination, with per-lock dwell debounce, cooldown latch, and optional force-open. Live hub: [`observe-perceive`](https://github.com/wking53214/observe-perceive).
+Keys open Locks under declared `AND` / `OR` / `N_OF_M` combination, with per-lock dwell debounce, cooldown latch, and optional force-open.
 
 ## 2. Full System Scope & Architectural Depth
 
-ζ is an **extraction**, not a new invention. The same shape — registry of required conditions + evaluator + debounce/cooldown + force-vs-soft — was built independently at least five times in OBSERVE/PERCEIVE, never unified:
+ζ is an **extraction**, not a new invention. The same shape - registry of required conditions + evaluator + debounce/cooldown + force-vs-soft - was built independently at least five times in PERCEIVE and a separate private repository, never unified:
 
 | Piece | Extracted from | Generalized |
 |---|---|---|
 | `LockSpec` registry | PERCEIVE `MODIFICATION_LEVELS` / `RISK_TIERS` / `EXPORT_RESTRICTIONS` / `OVERRIDE_CATEGORIES` | Named entry → conditions. Not 1:1 semantic coverage (see Gaps). |
-| Dwell + cooldown | OBSERVE `EscalationPolicy.evaluate` | One shared regime per patient → N independent locks per entity. |
-| Force bypass | `CLINICAL_SAFETY_BYPASS` | Inline OR-gate → declarable `force=True`. |
+| Dwell + cooldown | Dwell and cooldown policy in a separate private repository | One shared regime per patient → N independent locks per entity. |
+| Force bypass | Clinical safety bypass in a separate private repository | Inline OR-gate → declarable `force=True`. |
 | Combination | PERCEIVE `ConsensusEngine` (AND-only) | AND / OR / N_OF_M. |
 | Deterministic time | PERCEIVE `GovernanceState` | Every transition takes an explicit `timestamp`. Never wall-clock. |
 
@@ -33,7 +33,7 @@ Keys open Locks under declared `AND` / `OR` / `N_OF_M` combination, with per-loc
 - **`LockStateStore`**: in-memory `entity_id → lock_id → LockState`. `snapshot`/`restore` copy via `dataclasses.replace` so snapshots are not aliased to live objects.
 - **`LockEvaluator`**: `evaluate(entity_id, keys, lock_id, timestamp)` and `evaluate_all`. Unknown lock → `KeyError`. Unknown combination → `ValueError` (fail-closed).
 
-Dwell is **symmetric**: opening and closing both require `dwell_threshold` consecutive confirming observations, matching OBSERVE (a single normal reading after a spike must not immediately flip closed). `force=True` skips dwell. After open, `lock_seconds` latches the lock open and ignores new input (cooldown). `lock_seconds=0` means no latch.
+Dwell is **symmetric**: opening and closing both require `dwell_threshold` consecutive confirming observations, matching the implementation it was extracted from (a single normal reading after a spike must not immediately flip closed). `force=True` skips dwell. After open, `lock_seconds` latches the lock open and ignores new input (cooldown). `lock_seconds=0` means no latch.
 
 ### Layout
 
@@ -47,7 +47,7 @@ zeta/evaluator.py   LockEvaluator, LockResult
 ## 3. What It Does NOT Do / Non-Goals
 
 - Does **not** detect Keys (α) or emit a Decision narrative (β).
-- Does **not** persist. In-memory only. Durability is the caller's job (δ / sentinel_os).
+- Does **not** persist. In-memory only. Durability is the caller's job (δ).
 - Does **not** issue authorization. An open lock is a boolean interlock, not a grant.
 - Does **not** implement pre-open refractory (`temporal_lock_hours` — minimum wait *before* opening). `lock_seconds` is post-open cooldown, the opposite polarity.
 - Does **not** represent "always-open" (`required_keys` must be non-empty) or categorical kill-switches (`OVERRIDE_CATEGORIES['allowed']`).
@@ -59,7 +59,7 @@ zeta/evaluator.py   LockEvaluator, LockResult
 
 | Gap | Detail |
 |---|---|
-| Not on the live orchestrator path | observe-perceive still uses `EscalationPolicy` / PERCEIVE dicts. ζ is a composable extract. Dual implementation. |
+| Not on the live path | A separate private repository still uses its own escalation policy / PERCEIVE dicts. ζ is a composable extract. Dual implementation. |
 | In-memory | Process crash loses all lock state. No snapshot-to-disk helper. |
 | Uncalibrated tunables | `dwell_threshold`, `lock_seconds` are caller-chosen. No recommended production values. |
 | Incomplete PERCEIVE coverage | Numeric elapsed-time thresholds, always-open aggregate export, unconditional reject categories: **not representable**. |
@@ -98,7 +98,7 @@ result = evaluator.evaluate("patient_1", keys, "sepsis_lock", datetime.now())
 # LockResult: lock_id, open, changed, forced, keys_satisfied, ...
 ```
 
-`LockResult.changed` is what β uses as the nearest analogue of OBSERVE's `escalation_required`.
+`LockResult.changed` is what β uses as the nearest analogue of the escalation-required flag in the implementation ζ was extracted from.
 
 ## 7. Stack Integration Topology
 
@@ -116,7 +116,7 @@ result = evaluator.evaluate("patient_1", keys, "sepsis_lock", datetime.now())
 ```
 
 Downstream: [`interconnected_beta`](https://github.com/wking53214/interconnected_beta).  
-Source of extraction: OBSERVE `observe_consolidated.py`, PERCEIVE `perceive_consolidated.py`.  
-Custody of lock snapshots: not implemented here; intended consumer is δ / sentinel_os.
+Source of extraction: PERCEIVE and a separate private repository.  
+Custody of lock snapshots: not implemented here; intended consumer is δ.
 
 Apache-2.0.
