@@ -119,4 +119,4 @@ Downstream: [`interconnected_beta`](https://github.com/wking53214/interconnected
 Source of extraction: OBSERVE `observe_consolidated.py`, PERCEIVE `perceive_consolidated.py`.  
 Custody of lock snapshots: not implemented here; intended consumer is δ / sentinel_os.
 
-Apache-2.0.
+Proprietary. Copyright (c) 2026 William King. All rights reserved. See LICENSE.
