@@ -119,4 +119,19 @@ Downstream: [`interconnected_beta`](https://github.com/wking53214/interconnected
 Source of extraction: OBSERVE `observe_consolidated.py`, PERCEIVE `perceive_consolidated.py`.  
 Custody of lock snapshots: not implemented here; intended consumer is δ / sentinel_os.
 
+## Optional CNS connection
+
+zeta does not need CNS. It has no runtime dependency, nothing in the package imports CNS when it loads, and the evaluator never imports it (`tests/test_cns_independence.py` checks this with CNS blocked). `zeta/cns_connector.py` is the one place that knows CNS exists. Install it with `pip install 'zeta[cns] @ git+https://github.com/wking53214/interconnected_zeta'` (CNS needs Python 3.10+); without CNS, computing a digest raises `CnsNotInstalled` and nothing else changes.
+
+It makes zeta's outputs **bindable** to a verdict in CNS's shared gate contract (`cns.gate`), so a verdict about an output can be checked against that output:
+
+| Output | Bound content | Default subject |
+|---|---|---|
+| `LockResult` | `lock_id`, `open`, `changed`, `forced`, `reasons` (in the order written) | `zeta.lock_result` |
+| `LockStateStore.snapshot(entity_id)` | every field of every `LockState`, keyed by `lock_id` (listing order cannot change the digest); times as `isoformat()` | `zeta.lock_snapshot` |
+
+`lock_result_digest`, `snapshot_digest` and `binds(verdict, output)` are the whole surface; `lock_result_content` and `snapshot_content` return the plain content (no CNS needed). `binds` is true only for a verdict issued against exactly that output, and false for an unbound or hand-built one. A `LockResult` does not record which entity it is about, so pass `entity_id=` to bind that too.
+
+This is **binding only**, on purpose. An open lock is a boolean interlock, not an authorization (see non-goals), so zeta offers no gate, no PASS / RETRY / BREACH mapping and no chain. Whoever judges a lock owns the verdict; zeta only lets that verdict be tied to the result it was about.
+
 Apache-2.0.
