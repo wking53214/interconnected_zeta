@@ -53,3 +53,25 @@ def test_keyset_names_present():
 def test_keyset_rejects_invalid_min_confidence():
     with pytest.raises(ValueError):
         KeySet([], min_confidence=1.5)
+
+
+def test_all_keys_lists_every_key_including_absent_and_low_confidence():
+    fever = Key(name="fever", present=True, confidence=0.9)
+    absent = Key(name="tachycardia", present=False)
+    weak = Key(name="weak", present=True, confidence=0.3)
+    ks = KeySet([fever, absent, weak], min_confidence=0.5)
+    assert ks.names_present() == {"fever"}
+    assert ks.all_keys() == (fever, absent, weak)
+
+
+def test_all_keys_keeps_the_last_key_for_a_repeated_name_and_cannot_edit_the_set():
+    first = Key(name="fever", present=False)
+    second = Key(name="fever", present=True)
+    ks = KeySet([first, second])
+    keys = ks.all_keys()
+    assert keys == (second,)
+    assert isinstance(keys, tuple) and len(ks) == 1
+
+
+def test_all_keys_of_an_empty_set_is_empty():
+    assert KeySet([]).all_keys() == ()

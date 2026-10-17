@@ -7,7 +7,7 @@ reference by name instead of each caller re-deriving its own booleans.
 """
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Set
+from typing import Dict, Iterable, Optional, Set, Tuple
 
 
 @dataclass(frozen=True)
@@ -50,6 +50,14 @@ class KeySet:
         if k is None:
             return False
         return k.present and k.confidence >= self.min_confidence
+
+    def all_keys(self) -> Tuple[Key, ...]:
+        """Every Key in the set, present or not, in the order first seen.
+
+        `names_present` answers a different question: it leaves out Keys that are absent or below
+        `min_confidence`. Use this when the whole set matters (a record, a digest).
+        """
+        return tuple(self._by_name.values())
 
     def names_present(self) -> Set[str]:
         return {
