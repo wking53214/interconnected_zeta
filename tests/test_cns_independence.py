@@ -112,5 +112,5 @@ def _toml_list(section: str, key: str) -> list:
 def test_the_package_declares_no_runtime_dependency_on_cns_and_pins_the_cns_extra():
     runtime = _toml_list("project", "dependencies")
     assert not [d for d in runtime if re.match(r"\s*cns\b", d, re.I)], runtime
-    assert _toml_list("project.optional-dependencies", "cns") == ["cns @ git+https://github.com/wking53214/CNS.git@v1.8.0"]
+    assert _toml_list("project.optional-dependencies", "cns") == ["cns @ git+https://github.com/wking53214/CNS.git@v1.9.0"]
     assert not [d for d in _toml_list("project.optional-dependencies", "dev") if re.match(r"\s*cns\b", d, re.I)]
