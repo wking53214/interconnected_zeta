@@ -43,6 +43,10 @@ class LockState:
     locked_until: Optional[datetime] = None
     opened_at: Optional[datetime] = None
     forced: bool = False
+    # Newest observation time this lock has applied. An observation older than
+    # this is refused as stale (see evaluator.py). Not part of the CNS-bound
+    # snapshot content, so existing snapshot digests do not change.
+    last_observed_at: Optional[datetime] = None
 
 
 class LockStateStore:

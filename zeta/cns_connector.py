@@ -124,7 +124,7 @@ def lock_result_content(result: LockResult, *, entity_id: Optional[str] = None) 
         raise TypeError(f"expected a LockResult; got {type(result).__name__}")
     if not isinstance(result.reasons, (list, tuple)):
         raise TypeError(f"LockResult.reasons must be a list; got {type(result.reasons).__name__}")
-    return {
+    content = {
         "entity_id": _entity(entity_id),
         "lock_id": _text(result.lock_id, "LockResult.lock_id"),
         "open": bool(result.open),
@@ -132,6 +132,10 @@ def lock_result_content(result: LockResult, *, entity_id: Optional[str] = None) 
         "forced": bool(result.forced),
         "reasons": [_text(r, "a LockResult reason") for r in result.reasons],
     }
+    # Present only when true, so the digest of every non-stale result is unchanged.
+    if result.stale:
+        content["stale"] = True
+    return content
 
 
 def _state_content(state: LockState) -> Dict[str, Any]:
