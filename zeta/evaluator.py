@@ -71,6 +71,9 @@ class LockResult:
     changed: bool
     forced: bool
     reasons: List[str] = field(default_factory=list)
+    # True when the observation was older than the newest one this lock had
+    # applied. It was refused: the lock state did not move.
+    stale: bool = False
 
 
 class LockEvaluator:
@@ -81,6 +84,34 @@ class LockEvaluator:
     def evaluate(self, entity_id: str, keys: KeySet, lock_id: str, timestamp: datetime) -> LockResult:
         spec = self.registry.get(lock_id)
         state = self.state_store.get(entity_id, lock_id)
+
+        # Stale guard: an observation older than the newest one already applied
+        # is refused, loudly, and changes nothing. Without it a late replay of
+        # old readings could count as fresh confirmations and open or close a
+        # lock against newer evidence. An observation at the same time as the
+        # newest one is not stale.
+        if state.last_observed_at is not None:
+            try:
+                is_stale = timestamp < state.last_observed_at
+            except TypeError as exc:
+                raise ValueError(
+                    "observation timestamps must be all timezone-aware or all naive; "
+                    f"got {timestamp!r} after {state.last_observed_at!r}"
+                ) from exc
+            if is_stale:
+                return LockResult(
+                    lock_id=lock_id,
+                    open=state.open,
+                    changed=False,
+                    forced=state.forced,
+                    reasons=[
+                        f"Stale observation: {timestamp.isoformat()} is older than the newest "
+                        f"applied observation {state.last_observed_at.isoformat()}; "
+                        "refused, lock state unchanged"
+                    ],
+                    stale=True,
+                )
+        state.last_observed_at = timestamp
 
         # Cooldown latch: while locked, ignore new input entirely, in
         # either direction. Mirrors OBSERVE's

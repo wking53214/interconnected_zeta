@@ -35,6 +35,8 @@ Keys open Locks under declared `AND` / `OR` / `N_OF_M` combination, with per-loc
 
 Dwell is **symmetric**: opening and closing both require `dwell_threshold` consecutive confirming observations, matching OBSERVE (a single normal reading after a spike must not immediately flip closed). `force=True` skips dwell. After open, `lock_seconds` latches the lock open and ignores new input (cooldown). `lock_seconds=0` means no latch.
 
+Stale observations are refused. Each lock remembers the newest observation time it has applied (`LockState.last_observed_at`). An observation older than that returns a `LockResult` with `stale=True` and a reason, and changes no state, in either direction (it can neither count toward opening nor toward closing). An observation at the same time as the newest is not stale. Mixing timezone-aware and naive timestamps raises `ValueError`. The CNS-bound snapshot content does not include `last_observed_at`; a bound `LockResult` carries `stale: true` only when it is stale, so existing digests do not change.
+
 ### Layout
 
 ```
