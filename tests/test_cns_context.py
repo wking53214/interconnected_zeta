@@ -137,3 +137,41 @@ def test_a_keyset_digest_with_whitespace_around_it_is_refused(bad):
     _, result = evaluated()
     with pytest.raises(ValueError, match="full lowercase SHA-256"):
         lock_result_content(result, context=dict(CTX), keyset_digest=bad)
+
+
+# --- the content carries the fingerprint the result recorded, and refuses a result that recorded none -------------
+
+def test_with_a_context_the_content_carries_the_keyset_fingerprint_the_result_recorded():
+    _, result = evaluated()
+    content = lock_result_content(result, context=dict(CTX), keyset_digest=d("keys"))
+    assert content["keyset_fingerprint"] == result.keyset_fingerprint and len(content["keyset_fingerprint"]) == 64
+
+
+def test_without_a_context_the_content_does_not_carry_it_so_existing_digests_are_unchanged():
+    _, result = evaluated()
+    assert "keyset_fingerprint" not in lock_result_content(result)
+
+
+def test_a_result_that_recorded_no_fingerprint_is_refused_under_a_context():
+    from zeta import LockResult
+
+    by_hand = LockResult(lock_id="sepsis_lock", open=True, changed=False, forced=False)
+    with pytest.raises(ValueError, match="records no KeySet fingerprint"):
+        lock_result_content(by_hand, context=dict(CTX), keyset_digest=d("keys"))
+
+
+def test_the_fingerprint_is_part_of_what_the_digest_binds():
+    from dataclasses import replace
+
+    _, result = evaluated()
+    run = dict(context=dict(CTX), keyset_digest=d("keys"))
+    assert lock_result_digest(result, **run) != lock_result_digest(replace(result, keyset_fingerprint="0" * 64), **run)
+
+
+def test_a_fingerprint_that_is_not_a_full_sha256_is_refused():
+    from dataclasses import replace
+
+    _, result = evaluated()
+    for bad in ("short", "A" * 64, "a" * 64 + "\n", 7):
+        with pytest.raises((ValueError, TypeError)):
+            lock_result_content(replace(result, keyset_fingerprint=bad), context=dict(CTX), keyset_digest=d("keys"))

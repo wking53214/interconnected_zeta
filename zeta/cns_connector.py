@@ -71,7 +71,8 @@ LOCK_RESULT_SUBJECT = "zeta.lock_result"
 LOCK_SNAPSHOT_SUBJECT = "zeta.lock_snapshot"
 
 # One pipeline run, named the same way by every stage's connector (CNS publishes the contract in
-# cns_composition.pipeline_context and holds the four copies to it). A plain mapping, so zeta imports nothing.
+# cns_composition.spine_trace.context_problems, which the integration runner holds the four copies to). A plain
+# mapping, so zeta imports nothing.
 CONTEXT_SCHEMA = "spine-context/1"
 _CONTEXT_FIELDS = ("schema", "entity_id", "event_id", "run_id")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -195,8 +196,14 @@ def lock_result_content(
     if result.stale:
         content["stale"] = True
     if ctx is not None:
+        if not result.keyset_fingerprint:
+            raise ValueError(
+                "the LockResult records no KeySet fingerprint (it was not produced by LockEvaluator.evaluate), "
+                "so it cannot be bound to a KeySet"
+            )
         content["context"] = ctx
         content["keyset_digest"] = _digest(keyset_digest, "keyset_digest")
+        content["keyset_fingerprint"] = _digest(result.keyset_fingerprint, "LockResult.keyset_fingerprint")
     return content
 
 
