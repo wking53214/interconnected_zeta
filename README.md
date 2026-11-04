@@ -1,6 +1,6 @@
 # interconnected_zeta (ζ)
 
-Domain-agnostic **Locks** layer. Version `0.1.0`. Stdlib only. Python ≥ 3.9.
+Domain-agnostic **Locks** layer. Version `0.1.0`. Stdlib only. Python ≥ 3.10.
 
 ## 1. Pipeline Position & Role
 
