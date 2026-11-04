@@ -2,7 +2,7 @@
 name = "zeta"
 version = "0.1.0"
 description = "A domain-agnostic Locks layer: Keys open Locks under declared AND/OR/N-of-M combinations, with dwell debounce, cooldown latching, and force bypass."
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 dependencies = []
 
