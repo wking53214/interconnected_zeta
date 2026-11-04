@@ -67,7 +67,8 @@ zeta/evaluator.py   LockEvaluator, LockResult
 | Incomplete PERCEIVE coverage | Numeric elapsed-time thresholds, always-open aggregate export, unconditional reject categories: **not representable**. |
 | No distributed consensus | Multi-region lock agreement does not exist. A second process has a different `LockStateStore`. |
 | No Raft/Paxos | Documented as a future epic, not present. |
-| Git consumers | α/β/δ depend on this via git URL. δ and β pin nothing more specific than the repo URL (unpinned default branch). |
+| Git consumers | α, β and δ depend on this via git URL, each pinned by commit in its own `pyproject.toml` (and each repo has a test that holds the pin). Moving a pin is a reviewed change. |
+| Identity is the caller's | `LockResult` and `KeySet` carry no entity, event or run. `evaluate` accepts any KeySet under any `entity_id`. A result computed from a foreign KeySet is refused when it is bound (the connector), recorded (δ) or verified (CNS strict trace), not when it is evaluated. |
 
 Tests in `tests/`. Stdlib + pytest.
 
@@ -133,6 +134,8 @@ It makes zeta's outputs **bindable** to a verdict in CNS's shared gate contract 
 | `LockStateStore.snapshot(entity_id)` | every field of every `LockState`, keyed by `lock_id` (listing order cannot change the digest); times as `isoformat()` | `zeta.lock_snapshot` |
 
 `lock_result_digest`, `snapshot_digest` and `binds(verdict, output)` are the whole surface; `lock_result_content` and `snapshot_content` return the plain content (no CNS needed). `binds` is true only for a verdict issued against exactly that output, and false for an unbound or hand-built one. A `LockResult` does not record which entity it is about, so pass `entity_id=` to bind that too.
+
+**Binding a result to a run.** Pass `context=` (exactly `schema` `"spine-context/1"`, `entity_id`, `event_id`, `run_id`, all non-empty strings) and, for a `LockResult`, `keyset_digest=` (the digest of the exact KeySet it was evaluated from; both or neither). The content gains `context` and `keyset_digest`, so "this result came from that KeySet in that run" can be checked. An `entity_id=` that disagrees with the context raises. A snapshot takes a context only. Without them every existing digest is unchanged.
 
 This is **binding only**, on purpose. An open lock is a boolean interlock, not an authorization (see non-goals), so zeta offers no gate, no PASS / RETRY / BREACH mapping and no chain. Whoever judges a lock owns the verdict; zeta only lets that verdict be tied to the result it was about.
 
