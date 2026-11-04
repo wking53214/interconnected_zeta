@@ -6,6 +6,8 @@ governance stack (e.g. observe_consolidated.py's `hard_rule_fired`,
 reference by name instead of each caller re-deriving its own booleans.
 """
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Dict, Iterable, Optional, Set, Tuple
 
@@ -65,6 +67,22 @@ class KeySet:
             for name, k in self._by_name.items()
             if k.present and k.confidence >= self.min_confidence
         }
+
+    def fingerprint(self) -> str:
+        """A zeta-native SHA-256 of exactly what this KeySet holds, so a result can record what it was evaluated from.
+
+        Covers min_confidence and, for every Key in name order, its name, presence, confidence and reason (the reason
+        carries the readings a detector compared, so two sets of readings that list the same present Keys still
+        differ). Independent of insertion order and of int versus float spelling of a confidence. It is a fact about
+        this object, computed here, not a claim anyone supplies; it is not a signature and holds no key.
+        """
+        rows = [
+            {"name": k.name, "present": bool(k.present), "confidence": float(k.confidence), "reason": k.reason}
+            for k in sorted(self._by_name.values(), key=lambda key: key.name)
+        ]
+        body = json.dumps({"min_confidence": float(self.min_confidence), "keys": rows}, sort_keys=True,
+                          separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(body.encode("ascii")).hexdigest()
 
     def __len__(self) -> int:
         return len(self._by_name)
