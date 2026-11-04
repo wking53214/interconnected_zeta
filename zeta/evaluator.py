@@ -48,7 +48,7 @@ LockStateStore, so one evaluator instance serves every entity and every
 lock in a domain's LockRegistry.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Dict, List
 
@@ -74,6 +74,9 @@ class LockResult:
     # True when the observation was older than the newest one this lock had
     # applied. It was refused: the lock state did not move.
     stale: bool = False
+    # Fingerprint (KeySet.fingerprint) of the KeySet this was evaluated from, set by
+    # LockEvaluator.evaluate on every path. "" for a result built by hand.
+    keyset_fingerprint: str = ""
 
 
 class LockEvaluator:
@@ -82,6 +85,10 @@ class LockEvaluator:
         self.state_store = state_store if state_store is not None else LockStateStore()
 
     def evaluate(self, entity_id: str, keys: KeySet, lock_id: str, timestamp: datetime) -> LockResult:
+        # Every path below returns through here, so every result records the KeySet it came from.
+        return replace(self._evaluate(entity_id, keys, lock_id, timestamp), keyset_fingerprint=keys.fingerprint())
+
+    def _evaluate(self, entity_id: str, keys: KeySet, lock_id: str, timestamp: datetime) -> LockResult:
         spec = self.registry.get(lock_id)
         state = self.state_store.get(entity_id, lock_id)
 

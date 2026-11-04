@@ -68,7 +68,7 @@ zeta/evaluator.py   LockEvaluator, LockResult
 | No distributed consensus | Multi-region lock agreement does not exist. A second process has a different `LockStateStore`. |
 | No Raft/Paxos | Documented as a future epic, not present. |
 | Git consumers | α, β and δ depend on this via git URL, each pinned by commit in its own `pyproject.toml` (and each repo has a test that holds the pin). Moving a pin is a reviewed change. |
-| Identity is the caller's | `LockResult` and `KeySet` carry no entity, event or run. `evaluate` accepts any KeySet under any `entity_id`. A result computed from a foreign KeySet is refused when it is bound (the connector), recorded (δ) or verified (CNS strict trace), not when it is evaluated. |
+| Identity is the caller's | `LockResult` and `KeySet` carry no entity, event or run. `evaluate` accepts any KeySet under any `entity_id`. zeta never sees which KeySet a result is bound to: `keyset_digest` is asserted by whoever binds the result, so a result computed from one KeySet and bound to another KeySet's digest is accepted here, by δ and by CNS's strict trace, which check that the supplied contents agree with each other and not where they came from. What is refused is a result bound under a context that disagrees (the connector checks `entity_id` against the context) and a run whose stages carry different contexts or do not chain by digest. Closing this needs zeta itself to record the KeySet it evaluated, a change to `LockResult` that has not been made. |
 
 Tests in `tests/`. Stdlib + pytest.
 
