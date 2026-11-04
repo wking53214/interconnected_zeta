@@ -43,6 +43,7 @@ Install with the extra:
 from __future__ import annotations
 
 import importlib
+import re
 from collections.abc import Mapping
 from datetime import datetime
 from types import ModuleType
@@ -52,6 +53,7 @@ from .evaluator import LockResult
 from .state import LockState
 
 __all__ = [
+    "CONTEXT_SCHEMA",
     "CnsNotInstalled",
     "LOCK_RESULT_SUBJECT",
     "LOCK_SNAPSHOT_SUBJECT",
@@ -67,6 +69,12 @@ INSTALL_HINT = "pip install 'zeta[cns] @ git+https://github.com/wking53214/inter
 
 LOCK_RESULT_SUBJECT = "zeta.lock_result"
 LOCK_SNAPSHOT_SUBJECT = "zeta.lock_snapshot"
+
+# One pipeline run, named the same way by every stage's connector (CNS publishes the contract in
+# cns_composition.pipeline_context and holds the four copies to it). A plain mapping, so zeta imports nothing.
+CONTEXT_SCHEMA = "spine-context/1"
+_CONTEXT_FIELDS = ("schema", "entity_id", "event_id", "run_id")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class CnsNotInstalled(ImportError):
@@ -104,6 +112,41 @@ def _entity(entity_id: Optional[str]) -> Optional[str]:
     return None if entity_id is None else _text(entity_id, "entity_id")
 
 
+def _context(context: Any) -> Dict[str, str]:
+    """A validated copy of a pipeline context: exactly the four fields, all non-empty strings, a known schema."""
+    if not isinstance(context, Mapping):
+        raise TypeError(f"a pipeline context must be a mapping; got {type(context).__name__}")
+    if set(context) != set(_CONTEXT_FIELDS):
+        raise ValueError(f"a pipeline context has exactly the fields {list(_CONTEXT_FIELDS)}; got {sorted(map(str, context))}")
+    for name in _CONTEXT_FIELDS:
+        if not isinstance(context[name], str):
+            raise TypeError(f"context field {name} must be a str; got {type(context[name]).__name__}")
+        if not context[name]:
+            raise ValueError(f"context field {name} must be non-empty")
+    if context["schema"] != CONTEXT_SCHEMA:
+        raise ValueError(f"unsupported context schema {context['schema']!r}; this connector speaks {CONTEXT_SCHEMA!r}")
+    return {name: context[name] for name in _CONTEXT_FIELDS}
+
+
+def _digest(value: Any, what: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{what} must be a str digest; got {type(value).__name__}")
+    if not _SHA256.match(value):
+        raise ValueError(f"{what} is not a full lowercase SHA-256 digest")
+    return value
+
+
+def _run(entity_id: Optional[str], context: Optional[Mapping]) -> "tuple[Optional[str], Optional[Dict[str, str]]]":
+    """The entity to record and the validated context. An entity_id that disagrees with the context is refused."""
+    entity = _entity(entity_id)
+    if context is None:
+        return entity, None
+    ctx = _context(context)
+    if entity is not None and entity != ctx["entity_id"]:
+        raise ValueError(f"entity_id {entity!r} disagrees with the context's {ctx['entity_id']!r}")
+    return ctx["entity_id"], ctx
+
+
 def _count(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"LockState.pending_since_count must be an int to be bound; got {type(value).__name__}")
@@ -118,8 +161,24 @@ def _moment(value: Optional[datetime], what: str) -> Optional[str]:
     return value.isoformat()
 
 
-def lock_result_content(result: LockResult, *, entity_id: Optional[str] = None) -> Dict[str, Any]:
-    """The deterministic content a verdict on ``result`` is bound to."""
+def lock_result_content(
+    result: LockResult,
+    *,
+    entity_id: Optional[str] = None,
+    context: Optional[Mapping] = None,
+    keyset_digest: Optional[str] = None,
+) -> Dict[str, Any]:
+    """The deterministic content a verdict on ``result`` is bound to.
+
+    ``context`` (schema, entity_id, event_id, run_id) and ``keyset_digest`` (the digest of the exact KeySet this
+    was evaluated from) bind the result to one pipeline run. They come together or not at all; with them the
+    content gains ``context`` and ``keyset_digest``, without them it is exactly what it always was.
+    """
+    if keyset_digest is not None and context is None:
+        raise ValueError("keyset_digest needs a context")
+    if context is not None and keyset_digest is None:
+        raise ValueError("a context needs keyset_digest, the digest of the KeySet this result was evaluated from")
+    entity_id, ctx = _run(entity_id, context)
     if not isinstance(result, LockResult):
         raise TypeError(f"expected a LockResult; got {type(result).__name__}")
     if not isinstance(result.reasons, (list, tuple)):
@@ -135,6 +194,9 @@ def lock_result_content(result: LockResult, *, entity_id: Optional[str] = None) 
     # Present only when true, so the digest of every non-stale result is unchanged.
     if result.stale:
         content["stale"] = True
+    if ctx is not None:
+        content["context"] = ctx
+        content["keyset_digest"] = _digest(keyset_digest, "keyset_digest")
     return content
 
 
@@ -151,25 +213,50 @@ def _state_content(state: LockState) -> Dict[str, Any]:
     }
 
 
-def snapshot_content(snapshot: Mapping, *, entity_id: Optional[str] = None) -> Dict[str, Any]:
-    """The deterministic content a verdict on a ``LockStateStore.snapshot`` is bound to."""
+def snapshot_content(
+    snapshot: Mapping, *, entity_id: Optional[str] = None, context: Optional[Mapping] = None
+) -> Dict[str, Any]:
+    """The deterministic content a verdict on a ``LockStateStore.snapshot`` is bound to.
+
+    ``context`` binds it to one pipeline run; it adds ``context`` to the content. A snapshot is state, not
+    derived from one KeySet, so it takes no keyset_digest.
+    """
+    entity_id, ctx = _run(entity_id, context)
     if not isinstance(snapshot, Mapping):
         raise TypeError(f"expected a mapping of lock_id to LockState; got {type(snapshot).__name__}")
     locks = {_text(lock_id, "a snapshot key"): _state_content(state) for lock_id, state in snapshot.items()}
-    return {"entity_id": _entity(entity_id), "locks": locks}
+    content: Dict[str, Any] = {"entity_id": entity_id, "locks": locks}
+    if ctx is not None:
+        content["context"] = ctx
+    return content
 
 
-def lock_result_digest(result: LockResult, *, entity_id: Optional[str] = None) -> str:
+def lock_result_digest(
+    result: LockResult,
+    *,
+    entity_id: Optional[str] = None,
+    context: Optional[Mapping] = None,
+    keyset_digest: Optional[str] = None,
+) -> str:
     """The digest a verdict bound to ``result`` carries."""
-    return _cns_gate().subject_digest(lock_result_content(result, entity_id=entity_id))
+    return _cns_gate().subject_digest(
+        lock_result_content(result, entity_id=entity_id, context=context, keyset_digest=keyset_digest))
 
 
-def snapshot_digest(snapshot: Mapping, *, entity_id: Optional[str] = None) -> str:
+def snapshot_digest(snapshot: Mapping, *, entity_id: Optional[str] = None, context: Optional[Mapping] = None) -> str:
     """The digest a verdict bound to ``snapshot`` carries."""
-    return _cns_gate().subject_digest(snapshot_content(snapshot, entity_id=entity_id))
+    return _cns_gate().subject_digest(snapshot_content(snapshot, entity_id=entity_id, context=context))
 
 
-def binds(result: Any, obj: object, *, subject: Optional[str] = None, entity_id: Optional[str] = None) -> bool:
+def binds(
+    result: Any,
+    obj: object,
+    *,
+    subject: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    context: Optional[Mapping] = None,
+    keyset_digest: Optional[str] = None,
+) -> bool:
     """Whether the ``cns.gate.GateResult`` ``result`` was issued against exactly ``obj``.
 
     ``obj`` is a ``LockResult`` or a snapshot mapping. ``subject`` defaults to
@@ -178,9 +265,11 @@ def binds(result: Any, obj: object, *, subject: Optional[str] = None, entity_id:
     was.
     """
     if isinstance(obj, LockResult):
-        default, digest = LOCK_RESULT_SUBJECT, lock_result_digest(obj, entity_id=entity_id)
+        default = LOCK_RESULT_SUBJECT
+        digest = lock_result_digest(obj, entity_id=entity_id, context=context, keyset_digest=keyset_digest)
     elif isinstance(obj, Mapping):
-        default, digest = LOCK_SNAPSHOT_SUBJECT, snapshot_digest(obj, entity_id=entity_id)
+        default = LOCK_SNAPSHOT_SUBJECT
+        digest = snapshot_digest(obj, entity_id=entity_id, context=context)
     else:
         raise TypeError(f"expected a LockResult or a snapshot mapping; got {type(obj).__name__}")
     return bool(result.binds(default if subject is None else subject, digest))
