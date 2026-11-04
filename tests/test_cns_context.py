@@ -129,3 +129,11 @@ def test_binds_checks_a_verdict_issued_against_the_run_bound_result():
                                    reason="x", subject=LOCK_SNAPSHOT_SUBJECT,
                                    subject_digest=snapshot_digest({}, context=dict(CTX)))
     assert binds(snap_verdict, {}, context=dict(CTX))
+
+
+@pytest.mark.parametrize("bad", ["a" * 64 + "\n", "a" * 64 + " ", " " + "a" * 64, "\n" + "a" * 64])
+def test_a_keyset_digest_with_whitespace_around_it_is_refused(bad):
+    """re.match with `$` accepts a trailing newline, so a 65 character string passed as a full SHA-256."""
+    _, result = evaluated()
+    with pytest.raises(ValueError, match="full lowercase SHA-256"):
+        lock_result_content(result, context=dict(CTX), keyset_digest=bad)
