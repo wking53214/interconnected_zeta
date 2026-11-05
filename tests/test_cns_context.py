@@ -54,13 +54,19 @@ def test_with_a_context_the_content_names_the_run_and_the_keyset():
 @pytest.mark.parametrize("change", [
     {"context": {**CTX, "event_id": "ev-2"}},
     {"context": {**CTX, "run_id": "run-2"}},
-    {"context": {**CTX, "entity_id": "p2"}},
     {"keyset_digest": d("a different keyset")},
 ])
 def test_any_change_to_the_context_or_the_keyset_changes_the_digest(change):
     _, result = evaluated()
     base = dict(context=dict(CTX), keyset_digest=d("keys"))
     assert lock_result_digest(result, **base) != lock_result_digest(result, **{**base, **change})
+
+
+def test_a_context_for_another_entity_is_refused_for_a_result_evaluated_for_p1():
+    """Replaces the entity_id case that used to assert a different digest: a result for p1 is now refused under p2."""
+    _, result = evaluated()
+    with pytest.raises(ValueError, match="p1.*p2"):
+        lock_result_digest(result, context={**CTX, "entity_id": "p2"}, keyset_digest=d("keys"))
 
 
 def test_the_same_result_bound_to_two_runs_no_longer_binds_alike():
