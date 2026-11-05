@@ -52,3 +52,9 @@ def test_entity_id_does_not_change_the_keyset_fingerprint():
     before = ks.fingerprint()
     r = LockEvaluator(registry()).evaluate("p1", ks, "sepsis_lock", T0)
     assert r.keyset_fingerprint == before == ks.fingerprint()
+
+
+def test_fingerprint_stale_and_entity_id_are_plain_fields_any_builder_can_set():
+    forged = LockResult(lock_id="sepsis_lock", open=True, changed=True, forced=False,
+                        stale=True, keyset_fingerprint="a" * 64, entity_id="someone-else")
+    assert (forged.stale, forged.keyset_fingerprint, forged.entity_id) == (True, "a" * 64, "someone-else")
