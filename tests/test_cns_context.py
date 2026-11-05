@@ -8,6 +8,7 @@ unchanged (held by test_cns_connector.py).
 These skip where ``cns`` is not installed. CI installs the extra and sets ZETA_REQUIRE_CNS=1, so there they cannot skip.
 """
 import os
+from collections.abc import Mapping
 from datetime import datetime
 
 import pytest
@@ -175,3 +176,62 @@ def test_a_fingerprint_that_is_not_a_full_sha256_is_refused():
     for bad in ("short", "A" * 64, "a" * 64 + "\n", 7):
         with pytest.raises((ValueError, TypeError)):
             lock_result_content(replace(result, keyset_fingerprint=bad), context=dict(CTX), keyset_digest=d("keys"))
+
+
+class _FlippingContext(Mapping):
+    """Valid values for the first ``good_reads`` value reads, bad ones afterwards."""
+
+    def __init__(self, good_reads):
+        self.good_reads = good_reads
+        self.reads = 0
+
+    def __iter__(self):
+        return iter(CTX)
+
+    def __len__(self):
+        return len(CTX)
+
+    def __getitem__(self, key):
+        self.reads += 1
+        return CTX[key] if self.reads <= self.good_reads else "changed-" + key
+
+
+def test_context_is_snapshotted_once_and_never_reread():
+    from zeta.cns_connector import _context
+    ctx = _FlippingContext(good_reads=len(CTX))
+    got = _context(ctx)
+    assert got == CTX and type(got) is dict
+    assert ctx.reads == len(CTX)  # one read per field, all during the snapshot
+
+
+def test_context_that_changes_between_reads_never_yields_later_values():
+    from zeta.cns_connector import _context
+    for n in (0, 1, 3, 4, 5, 50):
+        ctx = _FlippingContext(good_reads=n)
+        try:
+            got = _context(ctx)
+        except (TypeError, ValueError):
+            assert n < len(CTX)  # only a snapshot that already held changed values may be refused
+            continue
+        # the copy equals the one snapshot taken, whichever values it held; nothing read afterwards is in it
+        assert got == {k: (CTX[k] if i < n else "changed-" + k) for i, k in enumerate(CTX)}
+        assert ctx.reads == len(CTX)
+
+
+@pytest.mark.parametrize("field", list(CTX))
+def test_context_str_subclass_is_refused_naming_the_field(field):
+    class S(str):
+        pass
+
+    from zeta.cns_connector import _context
+    bad = dict(CTX)
+    bad[field] = S(CTX[field])
+    with pytest.raises(TypeError, match=field):
+        _context(bad)
+
+
+def test_context_plain_dict_unchanged():
+    from zeta.cns_connector import _context
+    src = dict(CTX)
+    got = _context(src)
+    assert got == CTX and got is not src
