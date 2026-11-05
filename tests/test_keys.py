@@ -65,12 +65,47 @@ def test_all_keys_lists_every_key_including_absent_and_low_confidence():
 
 
 def test_all_keys_keeps_the_last_key_for_a_repeated_name_and_cannot_edit_the_set():
-    first = Key(name="fever", present=False)
-    second = Key(name="fever", present=True)
+    first = Key(name="fever", present=True, confidence=0.4, reason="first")
+    second = Key(name="fever", present=True, confidence=0.9, reason="second")
     ks = KeySet([first, second])
     keys = ks.all_keys()
     assert keys == (second,)
     assert isinstance(keys, tuple) and len(ks) == 1
+
+
+@pytest.mark.parametrize("first_present", [True, False])
+def test_keyset_refuses_a_repeated_name_whose_present_values_conflict(first_present):
+    first = Key(name="fever", present=first_present)
+    second = Key(name="fever", present=not first_present)
+    with pytest.raises(ValueError) as err:
+        KeySet([first, second])
+    msg = str(err.value)
+    assert "fever" in msg
+    assert str(first_present) in msg and str(not first_present) in msg
+
+
+def test_keyset_refuses_a_conflict_even_when_other_keys_sit_between_the_duplicates():
+    with pytest.raises(ValueError):
+        KeySet([Key("a", True), Key("b", True), Key("a", False)])
+
+
+def test_keyset_refuses_a_conflict_that_only_appears_on_the_third_repeat():
+    with pytest.raises(ValueError):
+        KeySet([Key("a", True), Key("a", True), Key("a", False)])
+
+
+def test_keyset_accepts_identical_present_repeats_for_absent_keys_too_and_last_wins():
+    first = Key(name="fever", present=False, confidence=0.2, reason="first")
+    second = Key(name="fever", present=False, confidence=0.7, reason="second")
+    ks = KeySet([first, second])
+    assert ks.all_keys() == (second,)
+    assert len(ks) == 1
+
+
+def test_keyset_has_no_other_way_to_add_keys():
+    ks = KeySet([Key("a", True)])
+    for attr in ("add", "update", "merge", "extend", "append"):
+        assert not hasattr(ks, attr)
 
 
 def test_all_keys_of_an_empty_set_is_empty():

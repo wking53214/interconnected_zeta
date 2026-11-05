@@ -42,6 +42,13 @@ class KeySet:
         self.min_confidence = min_confidence
         self._by_name: Dict[str, Key] = {}
         for k in keys:
+            earlier = self._by_name.get(k.name)
+            if earlier is not None and bool(earlier.present) != bool(k.present):
+                # Fail closed: a repeated name that disagrees about presence would silently drop one reading.
+                raise ValueError(
+                    f"Key '{k.name}' appears more than once with conflicting present values "
+                    f"({earlier.present} then {k.present})"
+                )
             self._by_name[k.name] = k
 
     def get(self, name: str) -> Optional[Key]:
