@@ -77,6 +77,9 @@ class LockResult:
     # Fingerprint (KeySet.fingerprint) of the KeySet this was evaluated from, set by
     # LockEvaluator.evaluate on every path. "" for a result built by hand.
     keyset_fingerprint: str = ""
+    # The entity_id this result was evaluated for, set by LockEvaluator.evaluate on every path. "" for a result
+    # built by hand. A plain field: anyone who builds a LockResult can set it.
+    entity_id: str = ""
 
 
 class LockEvaluator:
@@ -86,7 +89,11 @@ class LockEvaluator:
 
     def evaluate(self, entity_id: str, keys: KeySet, lock_id: str, timestamp: datetime) -> LockResult:
         # Every path below returns through here, so every result records the KeySet it came from.
-        return replace(self._evaluate(entity_id, keys, lock_id, timestamp), keyset_fingerprint=keys.fingerprint())
+        return replace(
+            self._evaluate(entity_id, keys, lock_id, timestamp),
+            keyset_fingerprint=keys.fingerprint(),
+            entity_id=entity_id,
+        )
 
     def _evaluate(self, entity_id: str, keys: KeySet, lock_id: str, timestamp: datetime) -> LockResult:
         spec = self.registry.get(lock_id)
