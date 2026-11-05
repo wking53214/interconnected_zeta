@@ -185,6 +185,13 @@ def lock_result_content(
         raise TypeError(f"expected a LockResult; got {type(result).__name__}")
     if not isinstance(result.reasons, (list, tuple)):
         raise TypeError(f"LockResult.reasons must be a list; got {type(result.reasons).__name__}")
+    # A result records the entity it was evaluated for. Under a context it must be the context's entity; an empty
+    # (legacy, hand-built) entity_id is still accepted.
+    if ctx is not None and result.entity_id and result.entity_id != ctx["entity_id"]:
+        raise ValueError(
+            f"the LockResult was evaluated for entity {result.entity_id!r} but the context's entity_id is "
+            f"{ctx['entity_id']!r}"
+        )
     content = {
         "entity_id": _entity(entity_id),
         "lock_id": _text(result.lock_id, "LockResult.lock_id"),

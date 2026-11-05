@@ -58,3 +58,37 @@ def test_fingerprint_stale_and_entity_id_are_plain_fields_any_builder_can_set():
     forged = LockResult(lock_id="sepsis_lock", open=True, changed=True, forced=False,
                         stale=True, keyset_fingerprint="a" * 64, entity_id="someone-else")
     assert (forged.stale, forged.keyset_fingerprint, forged.entity_id) == (True, "a" * 64, "someone-else")
+
+
+# --- the connector refuses a result recorded for another entity (attack X1) ----------------------------------
+
+import pytest  # noqa: E402
+
+from zeta.cns_connector import lock_result_content  # noqa: E402
+
+CTX = {"schema": "spine-context/1", "entity_id": "patient_1", "event_id": "event_1", "run_id": "run_1"}
+
+
+def _bound(entity, ctx=CTX):
+    keys = sick()
+    result = LockEvaluator(registry()).evaluate(entity, keys, "sepsis_lock", T0)
+    return lock_result_content(result, context=ctx, keyset_digest="a" * 64)
+
+
+def test_a_result_evaluated_for_another_entity_is_not_bound_under_this_context():
+    """X1: a result for patient_2 used to be bound under patient_1's context with entity_id taken from the context."""
+    with pytest.raises(ValueError, match=r"patient_2.*patient_1"):
+        _bound("patient_2")
+
+
+def test_a_result_for_the_contexts_entity_is_bound():
+    assert _bound("patient_1")["entity_id"] == "patient_1"
+
+
+def test_a_legacy_result_with_an_empty_entity_id_is_still_bound():
+    keys = sick()
+    result = LockEvaluator(registry()).evaluate("patient_1", keys, "sepsis_lock", T0)
+    legacy = LockResult(lock_id=result.lock_id, open=result.open, changed=result.changed, forced=result.forced,
+                        reasons=list(result.reasons), stale=result.stale, keyset_fingerprint=result.keyset_fingerprint)
+    assert legacy.entity_id == ""
+    assert lock_result_content(legacy, context=CTX, keyset_digest="a" * 64)["entity_id"] == "patient_1"
