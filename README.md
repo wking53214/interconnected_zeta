@@ -90,14 +90,14 @@ from zeta import Combination, Key, KeySet, LockEvaluator, LockRegistry, LockSpec
 
 registry = LockRegistry([
     LockSpec(
-        lock_id="sepsis_lock",
-        required_keys=("septic_shock", "respiratory_distress", "hypovolemic_shock"),
+        lock_id="hazard_lock",
+        required_keys=("signal_a", "signal_b", "signal_c"),
         combination=Combination.OR, force=True, lock_seconds=3600,
     ),
 ])
 evaluator = LockEvaluator(registry)
-keys = KeySet([Key(name="septic_shock", present=True, reason="...")])
-result = evaluator.evaluate("patient_1", keys, "sepsis_lock", datetime.now())
+keys = KeySet([Key(name="signal_a", present=True, reason="...")])
+result = evaluator.evaluate("entity_1", keys, "hazard_lock", datetime.now())
 # LockResult: lock_id, open, changed, forced, keys_satisfied, ...
 ```
 
@@ -106,7 +106,7 @@ result = evaluator.evaluate("patient_1", keys, "sepsis_lock", datetime.now())
 ## 7. Stack Integration Topology
 
 ```text
-α.observe(vitals) → KeySet
+α.observe(reading) → KeySet
                        │
                        ▼
               ζ.LockEvaluator  (in-process LockStateStore)

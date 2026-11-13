@@ -55,7 +55,7 @@ class Combination(str, Enum):
 class LockSpec:
     """Declarative definition of one gate.
 
-    lock_id:         unique name (e.g. "sepsis_lock", "discharge_lock")
+    lock_id:         unique name (e.g. "hazard_lock", "clearance_lock")
     required_keys:   Key names this lock evaluates
     combination:     AND (all required), OR (any one), N_OF_M (at least `n`)
     n:               required count when combination is N_OF_M
