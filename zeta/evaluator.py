@@ -184,7 +184,7 @@ class LockEvaluator:
         # Mirrors OBSERVE's pending_regime/dwell_count accumulation
         # (observe_consolidated.py:870-877), generalized to a boolean
         # "pending open/closed" per (entity, lock) instead of one shared
-        # counter per patient.
+        # counter per monitored subject.
         if satisfied == state.pending_open:
             state.pending_since_count += 1
         else:

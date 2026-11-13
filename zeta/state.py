@@ -5,7 +5,7 @@ Generalizes two patterns that exist today as separate, narrower mechanisms:
   - OBSERVE's EscalationPolicy instance (observe_consolidated.py:846-889)
     holds exactly this shape of state (current_regime, pending_regime,
     dwell_count, escalation_locked, last_escalation_time) but as ONE shared
-    instance per patient, wearing multiple unrelated hats: the same fields
+    instance per monitored subject, wearing multiple unrelated hats: the same fields
     are reused for regime escalation AND (separately) for the data-integrity
     fault path (observe_consolidated.py:1345-1361). LockStateStore instead
     keeps one independent LockState per (entity, lock) pair, so N named
