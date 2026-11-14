@@ -89,11 +89,13 @@ class LockEvaluator:
 
     def evaluate(self, entity_id: str, keys: KeySet, lock_id: str, timestamp: datetime) -> LockResult:
         # Every path below returns through here, so every result records the KeySet it came from.
-        return replace(
-            self._evaluate(entity_id, keys, lock_id, timestamp),
-            keyset_fingerprint=keys.fingerprint(),
-            entity_id=entity_id,
-        )
+        # The read-change-write of the lock's state is one step: the store's reentrant lock is held for all of it.
+        with self.state_store.lock:
+            return replace(
+                self._evaluate(entity_id, keys, lock_id, timestamp),
+                keyset_fingerprint=keys.fingerprint(),
+                entity_id=entity_id,
+            )
 
     def _evaluate(self, entity_id: str, keys: KeySet, lock_id: str, timestamp: datetime) -> LockResult:
         spec = self.registry.get(lock_id)
@@ -226,7 +228,8 @@ class LockEvaluator:
         )
 
     def evaluate_all(self, entity_id: str, keys: KeySet, timestamp: datetime) -> Dict[str, LockResult]:
-        return {
-            spec.lock_id: self.evaluate(entity_id, keys, spec.lock_id, timestamp)
-            for spec in self.registry.all()
-        }
+        with self.state_store.lock:  # one consistent pass over every lock
+            return {
+                spec.lock_id: self.evaluate(entity_id, keys, spec.lock_id, timestamp)
+                for spec in self.registry.all()
+            }
