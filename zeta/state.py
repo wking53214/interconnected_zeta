@@ -19,6 +19,7 @@ Generalizes two patterns that exist today as separate, narrower mechanisms:
     evaluator.py takes `timestamp` as an explicit argument.
 """
 
+import threading
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Dict, Optional
@@ -56,17 +57,25 @@ class LockStateStore:
     `snapshot`/`restore` themselves (e.g. to the immutable ledger in
     interconnected_delta) — this store's job is correct in-process state
     transitions, not storage.
+
+    Thread safety: `lock` is a reentrant lock. Each method below holds it, and
+    `LockEvaluator` holds it for the whole read-change-write of an evaluation,
+    so evaluators that share one store share one lock. A caller that reads a
+    state and acts on it in several steps can hold `lock` across them.
     """
 
     def __init__(self) -> None:
         self._states: Dict[str, Dict[str, LockState]] = {}
+        self.lock = threading.RLock()
 
     def get(self, entity_id: str, lock_id: str) -> LockState:
-        entity_states = self._states.setdefault(entity_id, {})
-        return entity_states.setdefault(lock_id, LockState())
+        with self.lock:
+            entity_states = self._states.setdefault(entity_id, {})
+            return entity_states.setdefault(lock_id, LockState())
 
     def set(self, entity_id: str, lock_id: str, state: LockState) -> None:
-        self._states.setdefault(entity_id, {})[lock_id] = state
+        with self.lock:
+            self._states.setdefault(entity_id, {})[lock_id] = state
 
     def snapshot(self, entity_id: str) -> Dict[str, LockState]:
         # `replace(state)` (with no field changes) makes a real per-object
@@ -74,7 +83,9 @@ class LockStateStore:
         # LockState objects themselves would stay aliased to the live
         # store, so a later `evaluate()` call (which mutates LockState
         # in place) would silently corrupt an already-taken "snapshot".
-        return {lock_id: replace(state) for lock_id, state in self._states.get(entity_id, {}).items()}
+        with self.lock:
+            return {lock_id: replace(state) for lock_id, state in self._states.get(entity_id, {}).items()}
 
     def restore(self, entity_id: str, states: Dict[str, LockState]) -> None:
-        self._states[entity_id] = {lock_id: replace(state) for lock_id, state in states.items()}
+        with self.lock:
+            self._states[entity_id] = {lock_id: replace(state) for lock_id, state in states.items()}

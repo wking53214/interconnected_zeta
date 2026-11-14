@@ -40,6 +40,7 @@ source found real gaps, kept here rather than glossed over:
     never-present Key as a workaround. Not currently supported directly.
 """
 
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Iterable, List, Optional, Set, Tuple
@@ -130,25 +131,31 @@ class LockRegistry:
 
     def __init__(self, specs: Optional[Iterable[LockSpec]] = None) -> None:
         self._specs: Dict[str, LockSpec] = {}
+        self._lock = threading.RLock()  # the check and the write in `register` are one step
         for s in specs or ():
             self.register(s)
 
     def register(self, spec: LockSpec) -> None:
-        if spec.lock_id in self._specs:
-            raise ValueError(f"Lock '{spec.lock_id}' already registered")
-        self._specs[spec.lock_id] = spec
+        with self._lock:
+            if spec.lock_id in self._specs:
+                raise ValueError(f"Lock '{spec.lock_id}' already registered")
+            self._specs[spec.lock_id] = spec
 
     def get(self, lock_id: str) -> LockSpec:
-        try:
-            return self._specs[lock_id]
-        except KeyError:
-            raise KeyError(f"Unknown lock '{lock_id}'") from None
+        with self._lock:
+            try:
+                return self._specs[lock_id]
+            except KeyError:
+                raise KeyError(f"Unknown lock '{lock_id}'") from None
 
     def all(self) -> List[LockSpec]:
-        return list(self._specs.values())
+        with self._lock:
+            return list(self._specs.values())
 
     def __contains__(self, lock_id: str) -> bool:
-        return lock_id in self._specs
+        with self._lock:
+            return lock_id in self._specs
 
     def __len__(self) -> int:
-        return len(self._specs)
+        with self._lock:
+            return len(self._specs)
