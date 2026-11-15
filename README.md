@@ -55,7 +55,7 @@ zeta/evaluator.py   LockEvaluator, LockResult
 - Does **not** represent "always-open" (`required_keys` must be non-empty) or categorical kill-switches (`OVERRIDE_CATEGORIES['allowed']`).
 - Does **not** reproduce `ConsensusEngine`'s continuous confidence score. `LockResult` is boolean + metadata.
 - Does **not** talk to Postgres/Redis/KMS.
-- **Thread safety is per object, and only in this process.** One `LockRegistry`, one `LockStateStore` and the evaluators that share them may be used from several threads: registering is one step, and an evaluation (the read, the change and the write of a lock's state) holds the store's reentrant `lock`, so no two overlap. Nothing here is safe across processes (the state is in memory), and a caller who reads a state and then acts on it in several steps must hold `store.lock` across them.
+- **Thread safety is per object, and only in this process.** One `LockRegistry`, one `LockStateStore` and the evaluators that share them may be used from several threads: registering is one step, and an evaluation (the read, the change and the write of a lock's state) holds the store's reentrant `lock`, so no two overlap. Nothing here is safe across processes (the state is in memory), and a caller who reads a state and then acts on it in several steps must hold `store.lock` across them. Evaluation is also all or nothing: if `evaluate` or `evaluate_all` raises for any reason, the entity's lock states are restored to what they were before the call, so retrying the same observation counts it once (before this, an interrupted `evaluate_all` left earlier locks advanced and a retry could open a lock with one real observation).
 
 ## 4. Brutally Honest Current Status & Gaps
 
