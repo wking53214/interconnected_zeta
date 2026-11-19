@@ -2,6 +2,18 @@
 
 Domain-agnostic **Locks** layer. Version `0.1.0`. Stdlib only. Python ≥ 3.10.
 
+## Role Within ≡TACK
+
+- **What it is.** The lock stage of the small reference spine: it turns named Keys into open or closed interlocks, with dwell, cooldown and force rules.
+- **Authority matrix.** Evaluation only. An open lock is a boolean interlock, not authorization. It does not define policy, enforce, authenticate, or keep evidence.
+- **Owns.** Lock specs and state, the evaluator, and the CNS binding of a `LockResult` and a snapshot.
+- **Does not own.** Detecting Keys (alpha), decisions (beta), custody (delta), durability, or distributed agreement.
+- **Depends on.** The standard library. CNS is optional.
+- **Depended on by.** alpha, beta and delta each pin it by git commit (stated in section 4; not re-checked here).
+- **Fail behavior.** Closed on bad config: unknown lock, empty or duplicate `required_keys`, bad `n` or unknown combination raise. A stale observation changes no state. State is in memory only, so a crash loses all lock state, and `evaluate` accepts any KeySet under any entity id (identity is the caller's). A lock that is already open reports no change when things get worse: when a second required Key appears on an open lock the result is `changed=False`, so a caller that reads `changed` as its escalation signal sees nothing new (EXECUTED 2026-11-17). Give each severity its own lock. Without `force=True`, a lock with `dwell_threshold` above 1 does not open on a first reading, and readings that alternate between present and absent never open it (EXECUTED 2026-11-17).
+
+Status: library, version 0.1.0, Apache-2.0. EXECUTED 2026-11-17 at `97f7899`, Python 3.13, in a fresh environment: `pip install -e ".[dev]" && pytest` gives 129 passed, 2 skipped (the two need CNS). With the `cns` extra installed and `ZETA_REQUIRE_CNS=1`, which is how CI's second job runs, 237 passed and none skipped. Not run: GitHub CI, Python 3.10 to 3.12.
+
 ## 1. Pipeline Position & Role
 
 **INTERLOCKS.** Second stage of the extracted decision spine.
@@ -10,11 +22,13 @@ Domain-agnostic **Locks** layer. Version `0.1.0`. Stdlib only. Python ≥ 3.10.
 α Alpha (Keys) → ζ Zeta (this repo) → β Beta (Decision) → δ Delta (custody)
 ```
 
-Keys open Locks under declared `AND` / `OR` / `N_OF_M` combination, with per-lock dwell debounce, cooldown latch, and optional force-open. Live hub: [`observe-perceive`](https://github.com/wking53214/observe-perceive).
+The order above is the design order. CNS's script `chains/spine_run.py` runs all four repos in this order (EXECUTED 2026-11-17: exit 0 against the four mains). observe-perceive's orchestrator does not call them.
+
+Keys open Locks under declared `AND` / `OR` / `N_OF_M` combination, with per-lock dwell debounce, cooldown latch, and optional force-open. Orchestrator: [`observe-perceive`](https://github.com/wking53214/observe-perceive).
 
 ## 2. Full System Scope & Architectural Depth
 
-ζ is an **extraction**, not a new invention. The same shape — registry of required conditions + evaluator + debounce/cooldown + force-vs-soft — was built independently at least five times in OBSERVE/PERCEIVE, never unified:
+ζ is an **extraction**, not a new invention. The same shape, registry of required conditions + evaluator + debounce/cooldown + force-vs-soft, was built independently at least five times in OBSERVE/PERCEIVE, never unified:
 
 | Piece | Extracted from | Generalized |
 |---|---|---|
@@ -51,7 +65,7 @@ zeta/evaluator.py   LockEvaluator, LockResult
 - Does **not** detect Keys (α) or emit a Decision narrative (β).
 - Does **not** persist. In-memory only. Durability is the caller's job (δ / sentinel_os).
 - Does **not** issue authorization. An open lock is a boolean interlock, not a grant.
-- Does **not** implement pre-open refractory (`temporal_lock_hours` — minimum wait *before* opening). `lock_seconds` is post-open cooldown, the opposite polarity.
+- Does **not** implement pre-open refractory (`temporal_lock_hours`, minimum wait *before* opening). `lock_seconds` is post-open cooldown, the opposite polarity.
 - Does **not** represent "always-open" (`required_keys` must be non-empty) or categorical kill-switches (`OVERRIDE_CATEGORIES['allowed']`).
 - Does **not** reproduce `ConsensusEngine`'s continuous confidence score. `LockResult` is boolean + metadata.
 - Does **not** talk to Postgres/Redis/KMS.
@@ -61,7 +75,7 @@ zeta/evaluator.py   LockEvaluator, LockResult
 
 | Gap | Detail |
 |---|---|
-| Not on the live orchestrator path | observe-perceive still uses `EscalationPolicy` / PERCEIVE dicts. ζ is a composable extract. Dual implementation. |
+| Not on the orchestrator path | observe-perceive still uses `EscalationPolicy` / PERCEIVE dicts. ζ is a composable extract. Dual implementation. |
 | In-memory | Process crash loses all lock state. No snapshot-to-disk helper. |
 | Uncalibrated tunables | `dwell_threshold`, `lock_seconds` are caller-chosen. No recommended production values. |
 | Incomplete PERCEIVE coverage | Numeric elapsed-time thresholds, always-open aggregate export, unconditional reject categories: **not representable**. |
@@ -98,7 +112,7 @@ registry = LockRegistry([
 evaluator = LockEvaluator(registry)
 keys = KeySet([Key(name="signal_a", present=True, reason="...")])
 result = evaluator.evaluate("entity_1", keys, "hazard_lock", datetime.now())
-# LockResult: lock_id, open, changed, forced, keys_satisfied, ...
+# LockResult: lock_id, open, changed, forced, reasons, stale, keyset_fingerprint, entity_id
 ```
 
 `LockResult.changed` is what β uses as the nearest analogue of OBSERVE's `escalation_required`.
@@ -118,6 +132,8 @@ result = evaluator.evaluate("entity_1", keys, "hazard_lock", datetime.now())
               δ.DecisionLedger.append   ← caller may also persist ζ.snapshot()
 ```
 
+Who runs this order: CNS's script `chains/spine_run.py`, not observe-perceive's orchestrator (see section 1 for the evidence).
+
 Downstream: [`interconnected_beta`](https://github.com/wking53214/interconnected_beta).  
 Source of extraction: OBSERVE `observe_consolidated.py`, PERCEIVE `perceive_consolidated.py`.  
 Custody of lock snapshots: not implemented here; intended consumer is δ / sentinel_os.
@@ -133,7 +149,7 @@ It makes zeta's outputs **bindable** to a verdict in CNS's shared gate contract 
 | `LockResult` | `lock_id`, `open`, `changed`, `forced`, `reasons` (in the order written) | `zeta.lock_result` |
 | `LockStateStore.snapshot(entity_id)` | every field of every `LockState`, keyed by `lock_id` (listing order cannot change the digest); times as `isoformat()` | `zeta.lock_snapshot` |
 
-`lock_result_digest`, `snapshot_digest` and `binds(verdict, output)` are the whole surface; `lock_result_content` and `snapshot_content` return the plain content (no CNS needed). `binds` is true only for a verdict issued against exactly that output, and false for an unbound or hand-built one. Under a `context=`, a `LockResult` whose non-empty `entity_id` differs from the context's `entity_id` raises `ValueError` naming both; a legacy result with an empty `entity_id` is still accepted and takes the context's entity. Without a context, pass `entity_id=` to bind the entity.
+`lock_result_digest`, `snapshot_digest` and `binds(verdict, output)` are the whole surface; `lock_result_content` and `snapshot_content` return the plain content (no CNS needed). `binds` is true only for a verdict that names exactly that output (the subject and its digest), and false for an unbound one or one that names another output. It compares what a verdict names and does not check who made it: a `GateResult` typed by hand with the right subject and digest binds too (EXECUTED 2026-11-17), so `binds` alone is not evidence that any gate judged the output. Under a `context=`, a `LockResult` whose non-empty `entity_id` differs from the context's `entity_id` raises `ValueError` naming both; a legacy result with an empty `entity_id` is still accepted and takes the context's entity. Without a context, pass `entity_id=` to bind the entity.
 
 **Binding a result to a run.** Pass `context=` (exactly `schema` `"spine-context/1"`, `entity_id`, `event_id`, `run_id`, all non-empty strings) and, for a `LockResult`, `keyset_digest=` (the digest of the exact KeySet it was evaluated from; both or neither). The content gains `context` and `keyset_digest`, so "this result came from that KeySet in that run" can be checked. An `entity_id=` that disagrees with the context raises. A snapshot takes a context only. Without them every existing digest is unchanged. Under a context the content also carries `keyset_fingerprint`, the one the result recorded when it was evaluated, and a result that recorded none (built by hand, or from an older zeta) is refused, so a context-bound result always says which KeySet it came from; alpha reports the same fingerprint for the KeySet it produced, which is how CNS matches the two. `keyset_digest` is still supplied by the binder (zeta cannot compute alpha's digest), and the fingerprint is what checks it.
 
