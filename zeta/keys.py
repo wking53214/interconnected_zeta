@@ -22,6 +22,10 @@ class Key:
     reason: str = ""
 
     def __post_init__(self) -> None:
+        if type(self.present) is not bool:
+            raise TypeError(
+                f"Key '{self.name}': present must be True or False, got {self.present!r}"
+            )
         if not (0.0 <= self.confidence <= 1.0):
             raise ValueError(
                 f"Key '{self.name}': confidence must be in [0.0, 1.0], got {self.confidence}"
