@@ -80,6 +80,10 @@ class LockResult:
     # The entity_id this result was evaluated for, set by LockEvaluator.evaluate on every path. "" for a result
     # built by hand. A plain field: anyone who builds a LockResult can set it.
     entity_id: str = ""
+    # The operator's signature over every other field (zeta.signing.lock_result_signing_input), set by
+    # LockEvaluator.evaluate only when the evaluator was given a signer. b"" otherwise, and for a result built by
+    # hand. Check it with zeta.signing.verify_lock_result_signature; a non-empty value proves nothing until checked.
+    signature: bytes = b""
 
 
 class LockEvaluator:
