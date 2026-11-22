@@ -58,6 +58,7 @@ zeta/keys.py        Key, KeySet
 zeta/locks.py       Combination, LockSpec, LockRegistry
 zeta/state.py       LockState, LockStateStore
 zeta/evaluator.py   LockEvaluator, LockResult
+zeta/signing.py     the lock-result signing slot (no key held here)
 ```
 
 ## 3. What It Does NOT Do / Non-Goals
@@ -69,6 +70,7 @@ zeta/evaluator.py   LockEvaluator, LockResult
 - Does **not** represent "always-open" (`required_keys` must be non-empty) or categorical kill-switches (`OVERRIDE_CATEGORIES['allowed']`).
 - Does **not** reproduce `ConsensusEngine`'s continuous confidence score. `LockResult` is boolean + metadata.
 - Does **not** talk to Postgres/Redis/KMS.
+- Does **not** hold, make, store or rotate a signing key. It calls a signer the operator plugs in (see **Signed lock results** below).
 - **Thread safety is per object, and only in this process.** One `LockRegistry`, one `LockStateStore` and the evaluators that share them may be used from several threads: registering is one step, and an evaluation (the read, the change and the write of a lock's state) holds the store's reentrant `lock`, so no two overlap. Nothing here is safe across processes (the state is in memory), and a caller who reads a state and then acts on it in several steps must hold `store.lock` across them. Evaluation is also all or nothing: if `evaluate` or `evaluate_all` raises for any reason, the entity's lock states are restored to what they were before the call, so retrying the same observation counts it once (before this, an interrupted `evaluate_all` left earlier locks advanced and a retry could open a lock with one real observation).
 
 ## 4. Brutally Honest Current Status & Gaps
@@ -82,7 +84,8 @@ zeta/evaluator.py   LockEvaluator, LockResult
 | No distributed consensus | Multi-region lock agreement does not exist. A second process has a different `LockStateStore`. |
 | No Raft/Paxos | Documented as a future epic, not present. |
 | Git consumers | α, β and δ depend on this via git URL, each pinned by commit in its own `pyproject.toml` (and each repo has a test that holds the pin). Moving a pin is a reviewed change. |
-| Identity is the caller's | `KeySet` carries no entity, event or run, a `LockResult` carries the `entity_id` it was evaluated for (never an event or run), and `evaluate` accepts any KeySet under any `entity_id`: the subject, event and run are whatever the binder's context says. What zeta does record, natively, is **which KeySet a result was evaluated from**: `KeySet.fingerprint()` (SHA-256 over `min_confidence` and every Key's name, presence, confidence and reason, so two sets of readings that list the same present Keys differ) is set on every `LockResult` as `keyset_fingerprint` by `evaluate`, on every path. A fingerprint is a fact computed here, not a signature: it holds no key, so someone who controls the evaluation can still lie, and a result built by hand records none. `LockResult.keyset_fingerprint`, `stale` and `entity_id` are plain dataclass fields: any caller who builds a `LockResult` can set them to any value, so they are not evidence of who produced a result. `LockEvaluator.evaluate` (and `evaluate_all`, which calls it) sets `entity_id` to the id it was called with; a hand-built result leaves it `""`. Zeta therefore proves content identity of what it evaluated (this KeySet fingerprint, this entity_id, these reasons), not who produced a result. |
+| Identity is the caller's | `KeySet` carries no entity, event or run, a `LockResult` carries the `entity_id` it was evaluated for (never an event or run), and `evaluate` accepts any KeySet under any `entity_id`: the subject, event and run are whatever the binder's context says. What zeta does record, natively, is **which KeySet a result was evaluated from**: `KeySet.fingerprint()` (SHA-256 over `min_confidence` and every Key's name, presence, confidence and reason, so two sets of readings that list the same present Keys differ) is set on every `LockResult` as `keyset_fingerprint` by `evaluate`, on every path. A fingerprint is a fact computed here, not a signature: it holds no key, so someone who controls the evaluation can still lie, and a result built by hand records none. `LockResult.keyset_fingerprint`, `stale` and `entity_id` are plain dataclass fields: any caller who builds a `LockResult` can set them to any value, so they are not evidence of who produced a result. `LockEvaluator.evaluate` (and `evaluate_all`, which calls it) sets `entity_id` to the id it was called with; a hand-built result leaves it `""`. Zeta therefore proves content identity of what it evaluated (this KeySet fingerprint, this entity_id, these reasons), not who produced a result, unless the operator plugs in a signer (next row). |
+| Signatures are opt-in and in-process | With a signer plugged in, every `LockResult` from `evaluate` carries a signature over all its other fields. With none (the default) results are unsigned exactly as before, and that setup is **unprotected**: anyone can build a `LockResult`. Even when signed, the signer runs in the same process as the evaluator, so any code there that can call it can sign a result it made up. A separate signer process is the next step. A `LockResult` has no time field, so a signature does not prove freshness; β binds time through the Decision and the prior lock-state digest. |
 
 Tests in `tests/`. Stdlib + pytest.
 
@@ -112,10 +115,44 @@ registry = LockRegistry([
 evaluator = LockEvaluator(registry)
 keys = KeySet([Key(name="signal_a", present=True, reason="...")])
 result = evaluator.evaluate("entity_1", keys, "hazard_lock", datetime.now())
-# LockResult: lock_id, open, changed, forced, reasons, stale, keyset_fingerprint, entity_id
+# LockResult: lock_id, open, changed, forced, reasons, stale, keyset_fingerprint, entity_id, signature
 ```
 
 `LockResult.changed` is what β uses as the nearest analogue of OBSERVE's `escalation_required`.
+
+## Signed lock results
+
+A lock result can be signed, so a later reader (β, δ, CNS) can check that the holder of the operator's key produced
+it. zeta holds no key: it builds the exact bytes to sign and calls the `sign` callable the operator supplies (an
+Ed25519 private key's `sign`, a KMS wrapper). Checking is the same: `verify_lock_result_signature(result,
+result.signature, verify)` with the operator's `verify` callable.
+
+```python
+evaluator = LockEvaluator(registry, signer=private_key.sign)   # signer=None (default): nothing signed, nothing changes
+result = evaluator.evaluate("entity_1", keys, "hazard_lock", now)
+zeta.verify_lock_result_signature(result, result.signature, verify)   # True only for an untouched, signed result
+```
+
+What is signed: a domain label `zeta-lock-result-signature/1` and a newline, then `schema` (`zeta-lock-result/1`)
+and every `LockResult` field except `signature` as canonical ASCII JSON (sorted keys, no spaces, no NaN), with every
+string checked as strict UTF-8 first. These are interconnected_delta's receipt-signing rules, copied byte for byte;
+`tests/test_signing.py` pins them, including DELTA's `strict_utf8` source. Only an exact `LockResult` with exact
+field types and a non-empty `lock_id`, `entity_id` and `keyset_fingerprint` can be signed, so a hand-built result that
+names no subject cannot be signed and replayed for any entity.
+
+Fail closed: a signer that raises or returns anything but non-empty `bytes` raises out of `evaluate` /
+`evaluate_all`, and the entity's lock states are put back, so no unsigned result escapes and a retry counts once.
+
+Limits, plainly:
+
+- **In-process forgery.** The signer is code in the same program. Anything that can call it can sign a lock result
+  that no evaluation produced. A signature proves who held the signer, not that the evaluation was honest. The next
+  step is a separate signer process that evaluates (or re-checks) before it signs.
+- **No signer, no protection.** With `signer=None` results are unsigned and anyone can build one. β refuses unsigned
+  or badly signed results only when a checker is plugged into it.
+- **No freshness.** `LockResult` carries no time, so an old signed result for the same entity and KeySet verifies
+  again. β's Decision (timestamp, `lock_results_digest`, `prior_state_digest`) and δ's ledger carry the time.
+- **No key management.** Trust, rotation and revocation belong to the operator's callables.
 
 ## 7. Stack Integration Topology
 
@@ -123,8 +160,8 @@ result = evaluator.evaluate("entity_1", keys, "hazard_lock", datetime.now())
 α.observe(reading) → KeySet
                        │
                        ▼
-              ζ.LockEvaluator  (in-process LockStateStore)
-                       │  Dict[lock_id, LockResult]
+              ζ.LockEvaluator  (in-process LockStateStore, optional signer)
+                       │  Dict[lock_id, LockResult]  (signed when a signer is plugged in)
                        ▼
               β.DecisionEngine.decide
                        │
