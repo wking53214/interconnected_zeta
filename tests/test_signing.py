@@ -218,3 +218,69 @@ def test_sign_and_verify_must_be_callable():
     with pytest.raises(TypeError):
         verify_lock_result_signature(a_result(), b"x", None)
 
+
+# The evaluator's slot.
+
+def run_every_path(evaluator):
+    """Forced open, cooldown, closing through dwell, pending, already closed, and stale."""
+    out = [evaluator.evaluate("p1", keys(a=True), "hazard", T0)]
+    out.append(evaluator.evaluate("p1", keys(a=False), "hazard", T0 + timedelta(seconds=10)))
+    out.append(evaluator.evaluate("p1", keys(a=False), "hazard", T0 + timedelta(seconds=100)))
+    out.append(evaluator.evaluate("p1", keys(a=True, b=True), "clear", T0))
+    out.append(evaluator.evaluate("p1", keys(a=True, b=True), "clear", T0 + timedelta(seconds=1)))
+    out.append(evaluator.evaluate("p1", keys(a=False), "clear", T0 + timedelta(seconds=2)))
+    out.append(evaluator.evaluate("p1", keys(a=False), "clear", T0))
+    out.extend(evaluator.evaluate_all("p2", keys(), T0).values())
+    return out
+
+
+def test_with_no_signer_nothing_changes_and_nothing_is_signed():
+    evaluator = LockEvaluator(registry())
+    assert evaluator.signer is None
+    results = run_every_path(evaluator)
+    assert any(r.stale for r in results) and any(r.forced for r in results)
+    assert all(r.signature == b"" for r in results)
+
+
+def test_with_a_signer_every_path_is_signed_and_otherwise_identical():
+    sign, verify = hmac_pair()
+    plain = run_every_path(LockEvaluator(registry()))
+    signed = run_every_path(LockEvaluator(registry(), signer=sign))
+    assert len(plain) == len(signed)
+    for p, s in zip(plain, signed):
+        assert s.signature and verify_lock_result_signature(s, s.signature, verify) is True
+        assert dataclasses.replace(s, signature=b"") == p
+
+
+def test_a_signer_must_be_callable():
+    with pytest.raises(TypeError, match="signer"):
+        LockEvaluator(registry(), signer=b"key")
+
+
+@pytest.mark.parametrize("bad_signer", [lambda d: "str", lambda d: b"", lambda d: 1 / 0])
+def test_a_failing_signer_puts_the_lock_states_back(bad_signer):
+    evaluator = LockEvaluator(registry(), signer=bad_signer)
+    before = evaluator.state_store.snapshot("p1")
+    with pytest.raises(Exception):
+        evaluator.evaluate("p1", keys(a=True), "hazard", T0)
+    with pytest.raises(Exception):
+        evaluator.evaluate_all("p1", keys(a=True), T0)
+    assert evaluator.state_store.snapshot("p1") == before
+
+
+def test_a_failing_signer_lets_a_retry_count_once():
+    calls = {"n": 0}
+    sign, verify = hmac_pair()
+
+    def flaky(data):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("signer offline")
+        return sign(data)
+
+    evaluator = LockEvaluator(registry(), signer=flaky)
+    with pytest.raises(RuntimeError):
+        evaluator.evaluate_all("p1", keys(a=True, b=True), T0)
+    results = evaluator.evaluate_all("p1", keys(a=True, b=True), T0)
+    assert results["clear"].open is False and "1/2" in results["clear"].reasons[0]
+    assert all(verify_lock_result_signature(r, r.signature, verify) for r in results.values())
