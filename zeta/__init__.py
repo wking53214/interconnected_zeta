@@ -20,6 +20,12 @@ from .keys import Key, KeySet
 from .locks import Combination, LockSpec, LockRegistry
 from .state import LockState, LockStateStore
 from .evaluator import LockResult, LockEvaluator
+from .signing import (
+    LOCK_RESULT_SIGNATURE_DOMAIN,
+    lock_result_signing_input,
+    sign_lock_result,
+    verify_lock_result_signature,
+)
 
 __all__ = [
     "Key",
@@ -31,6 +37,10 @@ __all__ = [
     "LockStateStore",
     "LockResult",
     "LockEvaluator",
+    "LOCK_RESULT_SIGNATURE_DOMAIN",
+    "lock_result_signing_input",
+    "sign_lock_result",
+    "verify_lock_result_signature",
 ]
 
 __version__ = "0.1.0"

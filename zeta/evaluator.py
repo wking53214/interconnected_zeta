@@ -50,7 +50,7 @@ lock in a domain's LockRegistry.
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 
 from .keys import KeySet
 from .locks import LockRegistry
@@ -80,12 +80,26 @@ class LockResult:
     # The entity_id this result was evaluated for, set by LockEvaluator.evaluate on every path. "" for a result
     # built by hand. A plain field: anyone who builds a LockResult can set it.
     entity_id: str = ""
+    # The operator's signature over every other field (zeta.signing.lock_result_signing_input), set by
+    # LockEvaluator.evaluate only when the evaluator was given a signer. b"" otherwise, and for a result built by
+    # hand. Check it with zeta.signing.verify_lock_result_signature; a non-empty value proves nothing until checked.
+    signature: bytes = b""
 
 
 class LockEvaluator:
-    def __init__(self, registry: LockRegistry, state_store: LockStateStore = None) -> None:
+    def __init__(
+        self,
+        registry: LockRegistry,
+        state_store: LockStateStore = None,
+        signer: Optional[Callable[[bytes], bytes]] = None,
+    ) -> None:
+        # signer is the operator's signing callable (bytes in, bytes out). None, the default, signs nothing and
+        # changes nothing. zeta never holds a key; see zeta.signing for what a signature does and does not prove.
+        if signer is not None and not callable(signer):
+            raise TypeError(f"signer must be callable or None; got {type(signer).__name__}")
         self.registry = registry
         self.state_store = state_store if state_store is not None else LockStateStore()
+        self.signer = signer
 
     def evaluate(self, entity_id: str, keys: KeySet, lock_id: str, timestamp: datetime) -> LockResult:
         # The read-change-write of the lock's state is one step: the store's reentrant lock is held for all of it.
@@ -100,12 +114,18 @@ class LockEvaluator:
                 raise
 
     def _result(self, entity_id: str, keys: KeySet, lock_id: str, timestamp: datetime) -> LockResult:
-        # Every path returns through here, so every result records the KeySet it came from.
-        return replace(
+        # Every path returns through here, so every result records the KeySet it came from, and every result is
+        # signed when a signer is plugged in. A signer that raises is raised inside evaluate's all-or-nothing step,
+        # so the lock states are put back and no unsigned result escapes.
+        result = replace(
             self._evaluate(entity_id, keys, lock_id, timestamp),
             keyset_fingerprint=keys.fingerprint(),
             entity_id=entity_id,
         )
+        if self.signer is None:
+            return result
+        from .signing import sign_lock_result
+        return replace(result, signature=sign_lock_result(result, self.signer))
 
     def _evaluate(self, entity_id: str, keys: KeySet, lock_id: str, timestamp: datetime) -> LockResult:
         spec = self.registry.get(lock_id)
